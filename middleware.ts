@@ -35,7 +35,7 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
 
   // Protect admin routes
-  if (!user && !request.nextUrl.pathname.startsWith("/login") && !request.nextUrl.pathname.startsWith("/api/webhooks")) {
+  if (!user && !request.nextUrl.pathname.startsWith("/login") && !request.nextUrl.pathname.startsWith("/api/webhooks") && !request.nextUrl.pathname.startsWith("/api/auth/callback")) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
@@ -53,6 +53,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|api/webhooks|api/cron).*)",
+    "/((?!_next/static|_next/image|favicon.ico|api/webhooks|api/cron|api/auth/callback).*)",
   ],
 };

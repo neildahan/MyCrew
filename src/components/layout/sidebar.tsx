@@ -10,6 +10,7 @@ import {
   BarChart3,
   Settings,
   CheckSquare,
+  Plug,
 } from "lucide-react";
 
 const navItems = [
@@ -17,6 +18,7 @@ const navItems = [
   { href: "/agents", label: "Agents", icon: Users },
   { href: "/conversations", label: "Conversations", icon: MessageSquare },
   { href: "/tasks", label: "Tasks", icon: CheckSquare },
+  { href: "/integrations", label: "Integrations", icon: Plug },
   { href: "/usage", label: "Usage", icon: BarChart3 },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

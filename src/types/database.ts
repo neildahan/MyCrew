@@ -255,6 +255,46 @@ export type Database = {
           updated_at?: string;
         };
       };
+      integrations: {
+        Row: {
+          id: string;
+          provider: string;
+          provider_account_id: string;
+          access_token: string;
+          refresh_token: string;
+          token_expires_at: string;
+          scopes: string[];
+          metadata: Record<string, unknown>;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          provider: string;
+          provider_account_id: string;
+          access_token: string;
+          refresh_token: string;
+          token_expires_at: string;
+          scopes?: string[];
+          metadata?: Record<string, unknown>;
+          is_active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          provider?: string;
+          provider_account_id?: string;
+          access_token?: string;
+          refresh_token?: string;
+          token_expires_at?: string;
+          scopes?: string[];
+          metadata?: Record<string, unknown>;
+          is_active?: boolean;
+          updated_at?: string;
+        };
+      };
       usage_logs: {
         Row: {
           id: string;
@@ -311,3 +351,7 @@ export type UsageLog = Database["public"]["Tables"]["usage_logs"]["Row"];
 export type Task = Database["public"]["Tables"]["tasks"]["Row"];
 export type TaskInsert = Database["public"]["Tables"]["tasks"]["Insert"];
 export type TaskUpdate = Database["public"]["Tables"]["tasks"]["Update"];
+
+export type Integration = Database["public"]["Tables"]["integrations"]["Row"];
+export type IntegrationInsert = Database["public"]["Tables"]["integrations"]["Insert"];
+export type IntegrationUpdate = Database["public"]["Tables"]["integrations"]["Update"];

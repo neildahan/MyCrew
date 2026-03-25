@@ -20,5 +20,26 @@ export interface AIProvider {
     systemPrompt: string;
     messages: AIMessage[];
     config?: AIProviderConfig;
+    tools?: ToolDefinition[];
+    toolExecutor?: (name: string, args: Record<string, unknown>) => Promise<unknown>;
   }): Promise<AIResponse>;
 }
+
+// Tool / function calling types
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: object;
+}
+
+export interface ToolCall {
+  name: string;
+  args: Record<string, unknown>;
+}
+
+export interface ToolResult {
+  name: string;
+  result: unknown;
+}
+
+export type ToolExecutor = (args: Record<string, unknown>) => Promise<unknown>;

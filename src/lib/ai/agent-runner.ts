@@ -1,6 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProvider } from "./provider-registry";
 import { buildSystemPrompt } from "@/lib/agents/prompt-builder";
+import { getToolsForAgent, executeToolCall } from "@/lib/tools/registry";
+import { isIntegrationConnected } from "@/lib/integrations/token-manager";
 import type { AIMessage } from "./types";
 
 const CONTEXT_MESSAGE_LIMIT = 20;
@@ -80,7 +82,21 @@ export async function runAgent(
   // 6. Build system prompt
   const systemPrompt = buildSystemPrompt(agent, skills ?? []);
 
-  // 7. Call AI provider
+  // 7. Load tools if the agent has them and integrations are connected
+  let tools = getToolsForAgent(agentSlug);
+  let toolExecutor: ((name: string, args: Record<string, unknown>) => Promise<unknown>) | undefined;
+
+  if (tools.length > 0) {
+    const googleConnected = await isIntegrationConnected("google");
+    if (googleConnected) {
+      toolExecutor = executeToolCall;
+    } else {
+      // No integration connected, don't provide tools
+      tools = [];
+    }
+  }
+
+  // 8. Call AI provider
   const provider = getProvider(agent.model_provider, agent.model_name);
   const aiResponse = await provider.generateResponse({
     systemPrompt,
@@ -89,9 +105,11 @@ export async function runAgent(
       temperature: agent.temperature,
       maxTokens: agent.max_tokens,
     },
+    tools: tools.length > 0 ? tools : undefined,
+    toolExecutor,
   });
 
-  // 8. Save user message
+  // 9. Save user message
   await supabase.from("messages").insert({
     conversation_id: conversation.id,
     role: "user",
@@ -99,7 +117,7 @@ export async function runAgent(
     message_type: "text",
   });
 
-  // 9. Save assistant message
+  // 10. Save assistant message
   await supabase.from("messages").insert({
     conversation_id: conversation.id,
     role: "assistant",
@@ -108,13 +126,13 @@ export async function runAgent(
     tokens_used: aiResponse.inputTokens + aiResponse.outputTokens,
   });
 
-  // 10. Update conversation timestamp
+  // 11. Update conversation timestamp
   await supabase
     .from("conversations")
     .update({ last_message_at: new Date().toISOString() })
     .eq("id", conversation.id);
 
-  // 11. Log usage
+  // 12. Log usage
   await supabase.from("usage_logs").insert({
     agent_id: agent.id,
     model_provider: agent.model_provider,
