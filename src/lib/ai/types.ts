@@ -9,6 +9,10 @@ export interface AIResponse {
   outputTokens: number;
   finishReason: string;
   toolData?: string; // JSON string of tool results for context in follow-ups
+  /** USD for this call, computed by the provider which knows the cache split. */
+  costUsd?: number;
+  /** The model that actually ran, which may differ if the budget forced a downgrade. */
+  modelUsed?: string;
 }
 
 export interface AIProviderConfig {

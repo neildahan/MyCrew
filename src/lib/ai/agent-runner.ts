@@ -2,6 +2,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getProvider } from "./provider-registry";
 import { buildSystemPrompt } from "@/lib/agents/prompt-builder";
 import { getToolsForAgent, executeToolCall } from "@/lib/tools/registry";
+import { getBudgetStatus, budgetExceededMessage } from "./budget";
+import { FALLBACK_MODEL } from "./pricing";
 import { isIntegrationConnected } from "@/lib/integrations/token-manager";
 import type { AIMessage } from "./types";
 
@@ -106,8 +108,35 @@ export async function runAgent(
     }
   }
 
-  // 8. Call AI provider
-  const provider = getProvider(agent.model_provider, agent.model_name);
+  // 8. Budget gate, then call the AI provider.
+  // Checked before the request rather than after, since afterwards the money
+  // is already spent. Near the cap we downgrade instead of cutting the user
+  // off; at the cap we stop.
+  const budget = await getBudgetStatus();
+
+  if (budget.state === "stop") {
+    console.warn(
+      `Monthly budget reached ($${budget.spend.toFixed(2)}/$${budget.budget.toFixed(2)}), refusing the request.`
+    );
+    return {
+      response: budgetExceededMessage(budget),
+      inputTokens: 0,
+      outputTokens: 0,
+    };
+  }
+
+  const modelName =
+    budget.state === "degrade" && agent.model_provider === "anthropic"
+      ? FALLBACK_MODEL
+      : agent.model_name;
+
+  if (modelName !== agent.model_name) {
+    console.warn(
+      `Budget at ${(budget.fraction * 100).toFixed(0)}%, using ${modelName} instead of ${agent.model_name}.`
+    );
+  }
+
+  const provider = getProvider(agent.model_provider, modelName);
   const aiResponse = await provider.generateResponse({
     systemPrompt,
     messages,
@@ -149,9 +178,13 @@ export async function runAgent(
   await supabase.from("usage_logs").insert({
     agent_id: agent.id,
     model_provider: agent.model_provider,
-    model_name: agent.model_name,
+    // Record what actually ran, not what the agent is configured with.
+    model_name: aiResponse.modelUsed ?? modelName,
     input_tokens: aiResponse.inputTokens,
     output_tokens: aiResponse.outputTokens,
+    // Without this the budget check above has nothing to read, and the
+    // dashboard reports $0.00 forever.
+    cost_usd: aiResponse.costUsd ?? 0,
     conversation_id: conversation.id,
   });
 

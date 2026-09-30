@@ -6,16 +6,20 @@ import type {
   AIProviderConfig,
   ToolDefinition,
 } from "../types";
+import { costUsd } from "../pricing";
 
 const MAX_TOOL_ITERATIONS = 5;
 
 const VALID_MODELS = [
+  "claude-opus-5",
+  "claude-sonnet-5",
+  "claude-haiku-4-5",
+  // Previous generation, kept so existing rows keep working.
   "claude-sonnet-4-6",
   "claude-opus-4-6",
-  "claude-haiku-4-5",
 ];
 
-const DEFAULT_MODEL = "claude-sonnet-4-6";
+const DEFAULT_MODEL = "claude-sonnet-5";
 
 export class AnthropicProvider implements AIProvider {
   private client: Anthropic;
@@ -86,6 +90,8 @@ export class AnthropicProvider implements AIProvider {
 
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let totalCacheWriteTokens = 0;
+    let totalCacheReadTokens = 0;
     let iterations = 0;
     const toolResults: Array<{ tool: string; data: unknown }> = [];
 
@@ -98,13 +104,23 @@ export class AnthropicProvider implements AIProvider {
         model: this.modelName,
         max_tokens: config?.maxTokens ?? 2048,
         temperature: config?.temperature ?? 0.7,
-        system: systemPrompt,
+        system: [
+          {
+            type: "text" as const,
+            text: systemPrompt,
+            // Input outweighs output ~25:1 here, so caching the stable
+            // prefix (tools + system) is the single biggest cost lever.
+            cache_control: { type: "ephemeral" as const },
+          },
+        ],
         messages: workingMessages,
         ...(anthropicTools ? { tools: anthropicTools } : {}),
       });
 
       totalInputTokens += response.usage.input_tokens;
       totalOutputTokens += response.usage.output_tokens;
+      totalCacheWriteTokens += response.usage.cache_creation_input_tokens ?? 0;
+      totalCacheReadTokens += response.usage.cache_read_input_tokens ?? 0;
 
       // Check if there are tool use blocks in the response
       const toolUseBlocks = response.content.filter(
@@ -122,6 +138,14 @@ export class AnthropicProvider implements AIProvider {
           content: textContent || "",
           inputTokens: totalInputTokens,
           outputTokens: totalOutputTokens,
+          costUsd: costUsd(
+            this.modelName,
+            totalInputTokens,
+            totalOutputTokens,
+            totalCacheWriteTokens,
+            totalCacheReadTokens
+          ),
+          modelUsed: this.modelName,
           finishReason: response.stop_reason ?? "unknown",
           toolData:
             toolResults.length > 0
@@ -197,6 +221,14 @@ export class AnthropicProvider implements AIProvider {
         "I tried to use tools but exceeded the maximum number of iterations. Please try again with a simpler request.",
       inputTokens: totalInputTokens,
       outputTokens: totalOutputTokens,
+      costUsd: costUsd(
+        this.modelName,
+        totalInputTokens,
+        totalOutputTokens,
+        totalCacheWriteTokens,
+        totalCacheReadTokens
+      ),
+      modelUsed: this.modelName,
       finishReason: "max_iterations",
     };
   }
