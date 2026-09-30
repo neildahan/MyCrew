@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDigestTasks } from "@/lib/reminders/save";
 import { sendTextMessage } from "@/lib/whatsapp/client";
 import { getCrewNumbers } from "@/lib/crew";
-import { DEFAULT_TIMEZONE, dayOfWeekIn, hourIn, endOfDayUtc } from "@/lib/time";
+import { DEFAULT_TIMEZONE, dayOfWeekIn, endOfDayUtc } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +12,9 @@ const TIMEZONE = DEFAULT_TIMEZONE;
 // and a digest that fires then is the kind of thing that gets the bot muted.
 const WORK_DAYS = [0, 1, 2, 3, 4];
 
-// Local hour the digest should land at. Vercel cron runs in UTC, and Israel
-// shifts between UTC+2 and UTC+3, so the cron fires at both candidate hours
-// and this guard picks the right one. No DST drift twice a year.
-const DIGEST_HOUR = Number(process.env.DIGEST_HOUR ?? 8);
+// The cron fires once a day at 05:00 UTC, which is 08:00 in Israel during
+// summer time and 07:00 in winter. An exact-hour guard here would skip the
+// digest entirely for half the year, so the hour is left to the schedule.
 
 function formatTime(iso: string | null): string {
   if (!iso) return "";
@@ -91,13 +90,6 @@ export async function GET(request: NextRequest) {
   if (!dryRun) {
     if (!WORK_DAYS.includes(dayOfWeekIn(now, TIMEZONE))) {
       return NextResponse.json({ message: "Weekend in Israel, digest skipped", count: 0 });
-    }
-    // The cron fires at both DST candidate hours; only one is the real one.
-    if (hourIn(now, TIMEZONE) !== DIGEST_HOUR) {
-      return NextResponse.json({
-        message: `Not the digest hour in ${TIMEZONE} (local ${hourIn(now, TIMEZONE)}:00, want ${DIGEST_HOUR}:00)`,
-        count: 0,
-      });
     }
   }
 
