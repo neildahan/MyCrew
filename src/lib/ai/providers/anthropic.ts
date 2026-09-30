@@ -21,6 +21,18 @@ const VALID_MODELS = [
 
 const DEFAULT_MODEL = "claude-sonnet-5";
 
+/**
+ * Models that removed the sampling parameters. Sending `temperature` to one of
+ * these is a hard 400 ("temperature is deprecated for this model"), not a
+ * warning, so it has to be omitted rather than clamped.
+ */
+const NO_SAMPLING_PARAMS = [
+  "claude-opus-5",
+  "claude-sonnet-5",
+  "claude-opus-4-8",
+  "claude-opus-4-7",
+];
+
 export class AnthropicProvider implements AIProvider {
   private client: Anthropic;
   private modelName: string;
@@ -103,7 +115,9 @@ export class AnthropicProvider implements AIProvider {
       const response = await this.client.messages.create({
         model: this.modelName,
         max_tokens: config?.maxTokens ?? 2048,
-        temperature: config?.temperature ?? 0.7,
+        ...(NO_SAMPLING_PARAMS.includes(this.modelName)
+          ? {}
+          : { temperature: config?.temperature ?? 0.7 }),
         system: [
           {
             type: "text" as const,
