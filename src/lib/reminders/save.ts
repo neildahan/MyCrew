@@ -8,7 +8,8 @@ export async function saveTask(
   taskType: string = "action",
   priority: string = "medium",
   dueAt?: string,
-  remindAt?: string
+  remindAt?: string,
+  requestedBy?: string
 ) {
   const supabase = createAdminClient();
 
@@ -23,6 +24,7 @@ export async function saveTask(
       priority,
       due_at: dueAt || null,
       remind_at: remindAt || null,
+      requested_by: requestedBy || null,
     })
     .select()
     .single();
@@ -73,4 +75,70 @@ export async function markTaskCompleted(id: string) {
       updated_at: new Date().toISOString(),
     })
     .eq("id", id);
+}
+
+/**
+ * Open tasks owned by one person that the other person asked for.
+ * Answers "what do I owe Inbal?" (owner = me, requester = Inbal).
+ */
+export async function getTasksOwedTo(ownerId: string, requesterId: string) {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("whatsapp_user_id", ownerId)
+    .eq("requested_by", requesterId)
+    .in("status", ["pending", "in_progress"])
+    .order("due_at", { ascending: true, nullsFirst: false });
+
+  if (error) {
+    console.error("Failed to get owed tasks:", error);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+/** Every open task for one person, regardless of who asked for it. */
+export async function getOpenTasksFor(ownerId: string) {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("whatsapp_user_id", ownerId)
+    .in("status", ["pending", "in_progress"])
+    .order("due_at", { ascending: true, nullsFirst: false });
+
+  if (error) {
+    console.error("Failed to get open tasks:", error);
+    return [];
+  }
+
+  return data ?? [];
+}
+
+/**
+ * Tasks for the morning digest: anything overdue, plus anything due
+ * before the given cutoff (normally end of today).
+ */
+export async function getDigestTasks(ownerId: string, cutoffIso: string) {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("whatsapp_user_id", ownerId)
+    .in("status", ["pending", "in_progress"])
+    .not("due_at", "is", null)
+    .lte("due_at", cutoffIso)
+    .order("due_at", { ascending: true });
+
+  if (error) {
+    console.error("Failed to get digest tasks:", error);
+    return [];
+  }
+
+  return data ?? [];
 }

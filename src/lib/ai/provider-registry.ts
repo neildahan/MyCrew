@@ -1,13 +1,12 @@
 import type { AIProvider } from "./types";
 import { GeminiProvider } from "./providers/gemini";
+import { AnthropicProvider } from "./providers/anthropic";
 
 type ProviderFactory = (apiKey: string, modelName: string) => AIProvider;
 
 const providerFactories: Record<string, ProviderFactory> = {
   gemini: (apiKey, modelName) => new GeminiProvider(apiKey, modelName),
-  // Future providers:
-  // openai: (apiKey, modelName) => new OpenAIProvider(apiKey, modelName),
-  // anthropic: (apiKey, modelName) => new AnthropicProvider(apiKey, modelName),
+  anthropic: (apiKey, modelName) => new AnthropicProvider(apiKey, modelName),
 };
 
 const apiKeyEnvVars: Record<string, string> = {

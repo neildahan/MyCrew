@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { getProvider } from "@/lib/ai/provider-registry";
 
 export interface ExtractedTask {
   isTask: boolean;
@@ -10,30 +10,27 @@ export interface ExtractedTask {
   remindAt: string; // ISO string or empty
 }
 
+// Use the configured provider for task extraction
+// Defaults to Anthropic if available, falls back to Gemini
+function getExtractionProvider() {
+  if (process.env.ANTHROPIC_API_KEY) {
+    return getProvider("anthropic", "claude-haiku-4-5");
+  }
+  return getProvider("gemini", "gemini-2.5-flash");
+}
+
 export async function extractTask(
   message: string,
   agentSlug: string,
   timezone: string = "Asia/Jerusalem"
 ): Promise<ExtractedTask> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY not set");
-
-  const client = new GoogleGenAI({ apiKey });
+  const provider = getExtractionProvider();
   const now = new Date().toLocaleString("en-US", { timeZone: timezone });
 
-  const response = await client.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: `Analyze this message and determine if the user is asking to DO something actionable (not just having a conversation).
+  const systemPrompt = `You analyze messages and determine if the user is asking to DO something actionable (not just having a conversation).
 
 Current date/time in ${timezone}: ${now}
 Agent: ${agentSlug}
-
-User message: "${message}"
 
 Respond ONLY with a JSON object (no markdown, no backticks):
 {
@@ -59,18 +56,15 @@ Rules:
 - If the message mentions "tomorrow at 9", "in 30 minutes", "at 14:00", etc → calculate the correct ISO datetime
 - If time already passed today, assume tomorrow
 - Priority: default "medium", use "high" if urgent language, "low" if casual
-- Title should be concise (under 60 chars)`,
-          },
-        ],
-      },
-    ],
-    config: {
-      temperature: 0.1,
-      maxOutputTokens: 512,
-    },
+- Title should be concise (under 60 chars)`;
+
+  const response = await provider.generateResponse({
+    systemPrompt,
+    messages: [{ role: "user", content: message }],
+    config: { temperature: 0.1, maxTokens: 512 },
   });
 
-  const text = response.text?.trim() || "";
+  const text = response.content?.trim() || "";
 
   try {
     const cleaned = text.replace(/```json?\n?/g, "").replace(/```/g, "").trim();

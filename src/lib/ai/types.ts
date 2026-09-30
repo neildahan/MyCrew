@@ -8,6 +8,7 @@ export interface AIResponse {
   inputTokens: number;
   outputTokens: number;
   finishReason: string;
+  toolData?: string; // JSON string of tool results for context in follow-ups
 }
 
 export interface AIProviderConfig {

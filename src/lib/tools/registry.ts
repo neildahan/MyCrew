@@ -13,17 +13,48 @@ import {
   sendEmailDefinition,
   sendEmailExecutor,
 } from "./gmail";
+import {
+  webSearchDefinition,
+  webSearchExecutor,
+  webFetchDefinition,
+  webFetchExecutor,
+} from "./web";
+import {
+  listMyTasksDefinition,
+  listMyTasksExecutor,
+  listOwedTasksDefinition,
+  listOwedTasksExecutor,
+  assignTaskDefinition,
+  assignTaskExecutor,
+  completeTaskDefinition,
+  completeTaskExecutor,
+  type ToolContext,
+} from "./tasks";
+import {
+  outlookListEventsDefinition,
+  outlookListEventsExecutor,
+  outlookCheckAvailabilityDefinition,
+  outlookCheckAvailabilityExecutor,
+} from "./outlook-calendar";
 
 // Map of tool name -> executor function
 const toolExecutors: Record<
   string,
-  (args: Record<string, unknown>) => Promise<unknown>
+  (args: Record<string, unknown>, context?: ToolContext) => Promise<unknown>
 > = {
   google_calendar_list_events: listEventsExecutor,
   google_calendar_create_event: createEventExecutor,
   google_calendar_check_availability: checkAvailabilityExecutor,
   gmail_read_emails: readEmailsExecutor,
   gmail_send_email: sendEmailExecutor,
+  web_search: webSearchExecutor,
+  web_fetch: webFetchExecutor,
+  tasks_list_mine: listMyTasksExecutor,
+  tasks_list_owed: listOwedTasksExecutor,
+  tasks_assign: assignTaskExecutor,
+  tasks_complete: completeTaskExecutor,
+  outlook_list_events: outlookListEventsExecutor,
+  outlook_check_availability: outlookCheckAvailabilityExecutor,
 };
 
 // Map of agent slug -> list of tool names they can use
@@ -34,8 +65,23 @@ const agentToolMap: Record<string, string[]> = {
     "google_calendar_check_availability",
     "gmail_read_emails",
     "gmail_send_email",
+    "web_search",
+    "web_fetch",
+    "tasks_list_mine",
+    "tasks_list_owed",
+    "tasks_assign",
+    "tasks_complete",
+    "outlook_list_events",
+    "outlook_check_availability",
   ],
-  // dana and james get no tools for now
+  dana: [
+    "web_search",
+    "web_fetch",
+  ],
+  james: [
+    "web_search",
+    "web_fetch",
+  ],
 };
 
 // Map of tool name -> definition
@@ -45,6 +91,14 @@ const toolDefinitions: Record<string, ToolDefinition> = {
   google_calendar_check_availability: checkAvailabilityDefinition,
   gmail_read_emails: readEmailsDefinition,
   gmail_send_email: sendEmailDefinition,
+  web_search: webSearchDefinition,
+  web_fetch: webFetchDefinition,
+  tasks_list_mine: listMyTasksDefinition,
+  tasks_list_owed: listOwedTasksDefinition,
+  tasks_assign: assignTaskDefinition,
+  tasks_complete: completeTaskDefinition,
+  outlook_list_events: outlookListEventsDefinition,
+  outlook_check_availability: outlookCheckAvailabilityDefinition,
 };
 
 /**
@@ -64,7 +118,8 @@ export function getToolsForAgent(agentSlug: string): ToolDefinition[] {
  */
 export async function executeToolCall(
   toolName: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  context?: ToolContext
 ): Promise<unknown> {
   const executor = toolExecutors[toolName];
   if (!executor) {
@@ -72,7 +127,7 @@ export async function executeToolCall(
   }
 
   try {
-    return await executor(args);
+    return await executor(args, context);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Tool execution error (${toolName}):`, message);

@@ -12,13 +12,13 @@ export async function GET(request: NextRequest) {
   if (error) {
     console.error("Google OAuth error:", error);
     return NextResponse.redirect(
-      new URL("/integrations?error=oauth_denied", request.url)
+      new URL("/integrations?error=oauth_denied&provider=google", request.url)
     );
   }
 
   if (!code) {
     return NextResponse.redirect(
-      new URL("/integrations?error=no_code", request.url)
+      new URL("/integrations?error=no_code&provider=google", request.url)
     );
   }
 
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
 
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(
-      new URL("/integrations?error=config_missing", request.url)
+      new URL("/integrations?error=config_missing&provider=google", request.url)
     );
   }
 
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
       const errorBody = await tokenResponse.text();
       console.error("Token exchange failed:", errorBody);
       return NextResponse.redirect(
-        new URL("/integrations?error=token_exchange", request.url)
+        new URL("/integrations?error=token_exchange&provider=google", request.url)
       );
     }
 
@@ -80,12 +80,12 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.redirect(
-      new URL("/integrations?success=true", request.url)
+      new URL("/integrations?success=true&provider=google", request.url)
     );
   } catch (err) {
     console.error("Google OAuth callback error:", err);
     return NextResponse.redirect(
-      new URL("/integrations?error=unknown", request.url)
+      new URL("/integrations?error=unknown&provider=google", request.url)
     );
   }
 }

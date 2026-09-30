@@ -145,10 +145,25 @@ export const createEventExecutor: ToolExecutor = async (args) => {
     return { error: "Google Calendar is not connected. Please connect your Google account first." };
   }
 
+  // Normalize datetime — handle various formats from AI
+  const normalizeDateTime = (dt: string): string => {
+    // If already full ISO with timezone, use as-is
+    if (dt.includes("+") || dt.endsWith("Z")) return dt;
+    // If it's a full ISO without timezone, add Israel timezone
+    if (dt.includes("T")) return dt + "+03:00";
+    // If it's just a date + time like "2026-03-26 20:00", convert
+    if (dt.includes(" ")) return dt.replace(" ", "T") + ":00+03:00";
+    // Fallback
+    return dt + "+03:00";
+  };
+
+  const startDateTime = normalizeDateTime(args.start_time as string);
+  const endDateTime = normalizeDateTime(args.end_time as string);
+
   const body: Record<string, unknown> = {
     summary: args.summary,
-    start: { dateTime: args.start_time },
-    end: { dateTime: args.end_time },
+    start: { dateTime: startDateTime, timeZone: "Asia/Jerusalem" },
+    end: { dateTime: endDateTime, timeZone: "Asia/Jerusalem" },
   };
 
   if (args.description) {

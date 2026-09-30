@@ -14,6 +14,22 @@ import { ArrowLeft, Save } from "lucide-react";
 import type { Agent } from "@/types/database";
 import Link from "next/link";
 
+const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  gemini: [
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+  ],
+  anthropic: [
+    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Recommended)" },
+    { value: "claude-opus-4-6", label: "Claude Opus 4.6 (Most capable)" },
+    { value: "claude-haiku-4-5", label: "Claude Haiku 4.5 (Fastest)" },
+  ],
+  openai: [
+    { value: "gpt-4o", label: "GPT-4o" },
+    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+  ],
+};
+
 export default function AgentDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -122,24 +138,36 @@ export default function AgentDetailPage() {
               <label className="text-sm font-medium">Provider</label>
               <Select
                 value={agent.model_provider}
-                onChange={(e) =>
-                  setAgent({ ...agent, model_provider: e.target.value })
-                }
+                onChange={(e) => {
+                  const newProvider = e.target.value;
+                  const models = MODEL_OPTIONS[newProvider] || [];
+                  const defaultModel = models[0]?.value || "";
+                  setAgent({
+                    ...agent,
+                    model_provider: newProvider,
+                    model_name: defaultModel,
+                  });
+                }}
               >
                 <option value="gemini">Google Gemini</option>
+                <option value="anthropic">Anthropic (Claude)</option>
                 <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
               </Select>
             </div>
             <div>
-              <label className="text-sm font-medium">Model Name</label>
-              <Input
+              <label className="text-sm font-medium">Model</label>
+              <Select
                 value={agent.model_name}
                 onChange={(e) =>
                   setAgent({ ...agent, model_name: e.target.value })
                 }
-                placeholder="e.g., gemini-2.0-flash"
-              />
+              >
+                {(MODEL_OPTIONS[agent.model_provider] || []).map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </Select>
             </div>
             <div>
               <label className="text-sm font-medium">

@@ -55,6 +55,7 @@ export class GeminiProvider implements AIProvider {
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
     let iterations = 0;
+    const toolResults: Array<{ tool: string; data: unknown }> = [];
 
     // Tool-calling loop
     while (iterations <= MAX_TOOL_ITERATIONS) {
@@ -91,6 +92,7 @@ export class GeminiProvider implements AIProvider {
           outputTokens: totalOutputTokens,
           finishReason:
             candidate?.finishReason ?? "unknown",
+          toolData: toolResults.length > 0 ? JSON.stringify(toolResults) : undefined,
         };
       }
 
@@ -111,12 +113,19 @@ export class GeminiProvider implements AIProvider {
         const args = (fc.args as Record<string, unknown>) || {};
 
         console.log(`[Gemini] Calling tool: ${name}`, JSON.stringify(args));
-        const result = await toolExecutor(name, args);
+        let result: unknown;
+        try {
+          result = await toolExecutor(name, args);
+        } catch (toolError: any) {
+          console.error(`[Gemini] Tool ${name} failed:`, toolError?.message);
+          result = { error: `Tool failed: ${toolError?.message || "unknown error"}` };
+        }
         console.log(
           `[Gemini] Tool result for ${name}:`,
           JSON.stringify(result).substring(0, 500)
         );
 
+        toolResults.push({ tool: name, data: result });
         functionResponseParts.push({
           functionResponse: { name, response: result },
         });

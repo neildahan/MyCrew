@@ -148,7 +148,7 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle>AI Provider API Keys</CardTitle>
           <CardDescription>
-            Configure API keys for your AI providers. Currently using Gemini Flash (free tier).
+            Configure API keys for your AI providers. Supports Gemini, Anthropic (Claude), and OpenAI.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

@@ -16,7 +16,17 @@ export async function GET(request: NextRequest) {
   const secret = request.nextUrl.searchParams.get("secret");
   const cronSecret = process.env.CRON_SECRET;
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}` && secret !== cronSecret) {
+  // Fail closed. An unset CRON_SECRET previously made this endpoint public,
+  // which on a deployed app means anyone can trigger outbound WhatsApp sends.
+  if (!cronSecret) {
+    console.error("CRON_SECRET is not set; refusing to run.");
+    return NextResponse.json(
+      { error: "Cron is not configured" },
+      { status: 503 }
+    );
+  }
+
+  if (authHeader !== `Bearer ${cronSecret}` && secret !== cronSecret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

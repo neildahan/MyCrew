@@ -4,7 +4,8 @@ import { runAgent, runAgentOneShot } from "@/lib/ai/agent-runner";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractTask } from "@/lib/reminders/extract";
 import { saveTask } from "@/lib/reminders/save";
-import { GoogleGenAI } from "@google/genai";
+import { getProvider } from "@/lib/ai/provider-registry";
+import { isCrewMember } from "@/lib/crew";
 
 const AGENT_COMMANDS: Record<string, string> = {
   "/yarden": "yarden",
@@ -63,45 +64,42 @@ async function isCrewMode(whatsappUserId: string): Promise<boolean> {
   return agent === "crew";
 }
 
-async function runCrewMode(text: string, senderId: string) {
-  // Single Gemini call that generates all 3 agent responses
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY not set");
+// Get the best available provider for crew mode (prefers Anthropic, falls back to Gemini)
+function getCrewProvider() {
+  if (process.env.ANTHROPIC_API_KEY) {
+    return getProvider("anthropic", "claude-sonnet-4-6");
+  }
+  return getProvider("gemini", "gemini-2.5-flash");
+}
 
-  const { GoogleGenAI } = await import("@google/genai");
-  const client = new GoogleGenAI({ apiKey });
+const CREW_SYSTEM_PROMPT = `You are simulating a team meeting. You MUST respond with exactly 3 sections, one per team member. Each section is 2-3 sentences.
 
-  const response = await client.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: [{
-      role: "user",
-      parts: [{
-        text: `You are simulating a team meeting with 3 team members. Each gives a SHORT reply (2-3 sentences).
+Team members:
+- YARDEN: Personal Secretary, warm & organized
+- DANA: Marketing Specialist, creative & bold
+- JAMES: Business Advisor, strategic & direct
 
-Team:
-1. YARDEN - Personal Secretary, warm & organized
-2. DANA - Marketing Specialist, creative & bold
-3. JAMES - Business Advisor, strategic & direct
+You MUST use this EXACT format with these EXACT markers (no variations, no markdown, no extra text before/after):
 
-Format EXACTLY like this:
 ---YARDEN---
-[response]
+[Yarden's response here]
 ---DANA---
-[response]
+[Dana's response here]
 ---JAMES---
-[response]
+[James's response here]
 
-User: "${text}"`
-      }]
-    }],
-    config: {
-      temperature: 0.8,
-      maxOutputTokens: 512,
-      thinkingConfig: { thinkingBudget: 0 },
-    },
+CRITICAL: Start your response with ---YARDEN--- immediately. Do not add any preamble.`;
+
+async function runCrewMode(text: string, senderId: string) {
+  const provider = getCrewProvider();
+
+  const response = await provider.generateResponse({
+    systemPrompt: CREW_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: text }],
+    config: { temperature: 0.8, maxTokens: 512 },
   });
 
-  const fullText = response.text || "";
+  const fullText = response.content || "";
   console.log("Crew mode raw response:", fullText.substring(0, 500));
 
   // Parse the responses by splitting on markers
@@ -166,6 +164,49 @@ async function tryExtractAndSaveTask(text: string, agentSlug: string, senderId: 
   return false;
 }
 
+// Robust extraction: tries multiple patterns to find an agent's response
+function extractAgentResponse(fullText: string, agentName: string, index: number): string {
+  // Pattern 1: ---NAME--- markers (primary format)
+  const markerRegex = new RegExp(
+    `---\\s*${agentName}\\s*---\\s*([\\s\\S]*?)(?=---\\s*(?:YARDEN|DANA|JAMES)\\s*---|$)`,
+    "i"
+  );
+  const markerMatch = fullText.match(markerRegex);
+  if (markerMatch && markerMatch[1].trim()) {
+    return markerMatch[1].trim();
+  }
+
+  // Pattern 2: **NAME** or NAME: style headers
+  const headerRegex = new RegExp(
+    `(?:\\*\\*${agentName}\\*\\*|${agentName}\\s*:)\\s*([\\s\\S]*?)(?=(?:\\*\\*(?:YARDEN|DANA|JAMES)\\*\\*|(?:YARDEN|DANA|JAMES)\\s*:)|$)`,
+    "i"
+  );
+  const headerMatch = fullText.match(headerRegex);
+  if (headerMatch && headerMatch[1].trim()) {
+    return headerMatch[1].trim();
+  }
+
+  // Pattern 3: Numbered list (1. YARDEN, 2. DANA, 3. JAMES)
+  const numberedRegex = new RegExp(
+    `${index + 1}\\.\\s*${agentName}[^\\n]*\\n\\s*([\\s\\S]*?)(?=\\d+\\.\\s*(?:YARDEN|DANA|JAMES)|$)`,
+    "i"
+  );
+  const numberedMatch = fullText.match(numberedRegex);
+  if (numberedMatch && numberedMatch[1].trim()) {
+    return numberedMatch[1].trim();
+  }
+
+  // Fallback: split by any recognizable separator and take by index
+  const fallbackParts = fullText
+    .split(/---\s*\w+\s*---|(?:\*\*\w+\*\*|\b(?:YARDEN|DANA|JAMES)\b\s*:)/i)
+    .filter((p) => p.trim());
+  if (fallbackParts[index]) {
+    return fallbackParts[index].trim();
+  }
+
+  return "";
+}
+
 export async function handleWhatsAppWebhook(payload: WhatsAppWebhookPayload) {
   for (const entry of payload.entry) {
     for (const change of entry.changes) {
@@ -192,6 +233,14 @@ async function processMessage(
 ) {
 
   const senderId = message.from;
+
+  // Allowlist gate. Anyone not in the crew is dropped without a reply: a reply
+  // would confirm to a stranger that this number runs a bot, and every message
+  // past this point spends the Anthropic key.
+  if (!isCrewMember(senderId)) {
+    console.warn(`Rejected message from non-crew sender: ${senderId}`);
+    return;
+  }
 
   // Extract message text
   let text = "";
@@ -241,39 +290,23 @@ async function processMessage(
   // Check if in crew mode
   if (await isCrewMode(senderId)) {
     try {
-      // Single fast Gemini call with no thinking
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error("No API key");
+      const provider = getCrewProvider();
 
-      const client = new GoogleGenAI({ apiKey });
-
-      const response = await client.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{
-          role: "user",
-          parts: [{
-            text: `You are simulating a team meeting. 3 team members each give a SHORT reply (2-3 sentences).
-
-YARDEN - Personal Secretary, warm & organized
-DANA - Marketing Specialist, creative & bold
-JAMES - Business Advisor, strategic & direct
-
-Reply EXACTLY in this format:
----YARDEN---
-[response]
----DANA---
-[response]
----JAMES---
-[response]
-
-User: "${text}"`
-          }]
-        }],
-        config: { temperature: 0.8, maxOutputTokens: 512, thinkingConfig: { thinkingBudget: 0 } },
+      const response = await provider.generateResponse({
+        systemPrompt: CREW_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: text }],
+        config: { temperature: 0.8, maxTokens: 512 },
       });
 
-      const fullText = response.text || "";
-      const parts = fullText.split(/---(?:YARDEN|DANA|JAMES)---/).filter((p: string) => p.trim());
+      const fullText = response.content || "";
+      console.log("Crew raw response:", fullText.substring(0, 800));
+
+      // Robust parsing: try marker-based split first, then fallback patterns
+      const yardenText = extractAgentResponse(fullText, "YARDEN", 0);
+      const danaText = extractAgentResponse(fullText, "DANA", 1);
+      const jamesText = extractAgentResponse(fullText, "JAMES", 2);
+
+      const parts = [yardenText, danaText, jamesText];
 
       // Save crew conversation and send messages
       const supabaseForCrew = createAdminClient();
@@ -367,10 +400,13 @@ User: "${text}"`
     const result = await runAgent(activeAgent, text, senderId);
     await sendTextMessage(senderId, result.response);
   } catch (error: any) {
-    console.error("Agent error:", error?.message || error);
+    const errMsg = error?.message || error?.toString() || "Unknown error";
+    const errStack = error?.stack || "";
+    console.error("Agent error:", errMsg);
+    console.error("Agent error stack:", errStack);
     await sendTextMessage(
       senderId,
-      "Sorry, I encountered an error processing your message. Please try again."
+      `Error: ${errMsg.substring(0, 200)}`
     );
   }
 }

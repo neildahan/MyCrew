@@ -33,7 +33,74 @@ export async function getValidToken(provider: string): Promise<string | null> {
     return refreshGoogleToken(integration);
   }
 
+  if (provider === "microsoft") {
+    return refreshMicrosoftToken(integration);
+  }
+
   return null;
+}
+
+/**
+ * Refresh a Microsoft identity platform access token.
+ *
+ * Microsoft rotates the refresh token on every exchange, so the new one must
+ * be stored or the connection dies at the next refresh.
+ */
+async function refreshMicrosoftToken(
+  integration: Integration
+): Promise<string | null> {
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
+  const tenant = process.env.MICROSOFT_TENANT ?? "common";
+
+  if (!clientId || !clientSecret) {
+    console.error("Missing MICROSOFT_CLIENT_ID or MICROSOFT_CLIENT_SECRET");
+    return null;
+  }
+
+  try {
+    const response = await fetch(
+      `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: integration.refresh_token,
+          grant_type: "refresh_token",
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error("Microsoft token refresh failed:", errorBody);
+      return null;
+    }
+
+    const data = await response.json();
+
+    const supabase = createAdminClient();
+    await supabase
+      .from("integrations")
+      .update({
+        access_token: data.access_token,
+        // Microsoft may return a rotated refresh token; keep the old one only
+        // if it did not.
+        refresh_token: data.refresh_token ?? integration.refresh_token,
+        token_expires_at: new Date(
+          Date.now() + data.expires_in * 1000
+        ).toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", integration.id);
+
+    return data.access_token;
+  } catch (error) {
+    console.error("Error refreshing Microsoft token:", error);
+    return null;
+  }
 }
 
 /**

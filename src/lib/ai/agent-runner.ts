@@ -82,17 +82,27 @@ export async function runAgent(
   // 6. Build system prompt
   const systemPrompt = buildSystemPrompt(agent, skills ?? []);
 
-  // 7. Load tools if the agent has them and integrations are connected
+  // 7. Load tools for the agent
   let tools = getToolsForAgent(agentSlug);
   let toolExecutor: ((name: string, args: Record<string, unknown>) => Promise<unknown>) | undefined;
 
   if (tools.length > 0) {
     const googleConnected = await isIntegrationConnected("google");
-    if (googleConnected) {
-      toolExecutor = executeToolCall;
-    } else {
-      // No integration connected, don't provide tools
-      tools = [];
+    if (!googleConnected) {
+      // Remove Google-specific tools if not connected, keep web tools
+      tools = tools.filter(t => !t.name.startsWith("google_") && !t.name.startsWith("gmail_"));
+    }
+
+    const microsoftConnected = await isIntegrationConnected("microsoft");
+    if (!microsoftConnected) {
+      // Offering a calendar tool that always errors just wastes turns.
+      tools = tools.filter(t => !t.name.startsWith("outlook_"));
+    }
+    if (tools.length > 0) {
+      // Bind the sender's identity here so task tools cannot be told
+      // who they are acting as by the model or the message content.
+      toolExecutor = (name, args) =>
+        executeToolCall(name, args, { whatsappUserId });
     }
   }
 
@@ -117,11 +127,14 @@ export async function runAgent(
     message_type: "text",
   });
 
-  // 10. Save assistant message
+  // 10. Save assistant message (include tool data for follow-up context)
+  const assistantContent = aiResponse.toolData
+    ? `${aiResponse.content}\n\n[Tool data: ${aiResponse.toolData}]`
+    : aiResponse.content;
   await supabase.from("messages").insert({
     conversation_id: conversation.id,
     role: "assistant",
-    content: aiResponse.content,
+    content: assistantContent,
     message_type: "text",
     tokens_used: aiResponse.inputTokens + aiResponse.outputTokens,
   });
