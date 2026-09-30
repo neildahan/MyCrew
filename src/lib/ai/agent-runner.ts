@@ -7,7 +7,11 @@ import { FALLBACK_MODEL } from "./pricing";
 import { isIntegrationConnected } from "@/lib/integrations/token-manager";
 import type { AIMessage } from "./types";
 
-const CONTEXT_MESSAGE_LIMIT = 20;
+// 20 messages of history was ~3,300 tokens resent on every single call - more
+// than half the bill - to answer questions that rarely need it. Tasks and
+// reminders live in the database, which is the real memory; this window only
+// has to cover the current back-and-forth.
+const CONTEXT_MESSAGE_LIMIT = 8;
 
 interface RunAgentResult {
   response: string;
@@ -79,7 +83,15 @@ export async function runAgent(
     role: m.role as AIMessage["role"],
     content: m.content,
   }));
-  messages.push({ role: "user", content: userMessage });
+  // The clock time rides along with the user's turn, which is after the cache
+  // breakpoint, so it costs nothing to change. Only the array sent to the model
+  // is annotated - the stored message stays clean.
+  const clockTime = new Date().toLocaleTimeString("en-IL", {
+    timeZone: "Asia/Jerusalem",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  messages.push({ role: "user", content: `[${clockTime}] ${userMessage}` });
 
   // 6. Build system prompt
   const systemPrompt = buildSystemPrompt(agent, skills ?? []);

@@ -110,6 +110,23 @@ export class AnthropicProvider implements AIProvider {
     // Working copy of messages for the tool-calling loop
     const workingMessages = [...mergedMessages];
 
+    // Second cache breakpoint, on the turn before the newest one. The first
+    // breakpoint (on `system`) covers tools + system; this one lets the
+    // conversation so far be reused as well, so only the new turn is billed
+    // at full rate. Anthropic allows up to 4 breakpoints.
+    if (workingMessages.length >= 2) {
+      const prior = workingMessages[workingMessages.length - 2];
+      if (typeof prior.content === "string") {
+        prior.content = [
+          {
+            type: "text" as const,
+            text: prior.content,
+            cache_control: { type: "ephemeral" as const },
+          },
+        ] as never;
+      }
+    }
+
     // Tool-calling loop
     while (iterations <= MAX_TOOL_ITERATIONS) {
       const response = await this.client.messages.create({

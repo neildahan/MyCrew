@@ -3,11 +3,17 @@ import type { Agent, Skill } from "@/types/database";
 export function buildSystemPrompt(agent: Agent, skills: Skill[]): string {
   let prompt = agent.system_prompt;
 
-  // Add current date/time context
+  // Date only - deliberately NOT the time of day.
+  //
+  // This string sits inside the cached prompt prefix. Including minutes meant
+  // the prefix changed every 60 seconds and the cache never hit once, which is
+  // most of the bill: a 3-word question was costing ~5,900 uncached input
+  // tokens. The precise clock time is injected with the user's turn instead,
+  // after the cache breakpoint, where changing it is free.
   const now = new Date();
-  const israelTime = now.toLocaleString("en-IL", { timeZone: "Asia/Jerusalem", dateStyle: "full", timeStyle: "short" });
+  const israelDate = now.toLocaleDateString("en-IL", { timeZone: "Asia/Jerusalem", dateStyle: "full" });
   const isoDate = now.toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" }); // YYYY-MM-DD
-  prompt += `\n\nCurrent date and time: ${israelTime} (${isoDate}). Use this to calculate dates like "tomorrow", "next week", etc.`;
+  prompt += `\n\nToday is ${israelDate} (${isoDate}), timezone Asia/Jerusalem. The current clock time is given with each message. Use these to resolve "tomorrow", "next week", etc.`;
   prompt = prompt.replace(
     "{{current_date}}",
     now.toLocaleDateString("en-US", {
