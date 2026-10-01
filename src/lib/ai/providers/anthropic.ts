@@ -185,22 +185,14 @@ export class AnthropicProvider implements AIProvider {
         };
       }
 
-      // Add assistant response (with tool_use blocks) to messages
+      // Echo the assistant turn back VERBATIM. Rebuilding it by hand broke on
+      // Sonnet 5: adaptive thinking puts a `thinking` block first, and the old
+      // two-case mapping turned it into a tool_use with no id ("messages.N.
+      // content.0.tool_use.id: Field required"). Thinking blocks must also be
+      // returned unmodified, signature included, for the next turn to be valid.
       workingMessages.push({
         role: "assistant",
-        content: response.content.map((block) => {
-          if (block.type === "text") {
-            return { type: "text" as const, text: block.text };
-          }
-          // tool_use block
-          const tu = block as Anthropic.ToolUseBlock;
-          return {
-            type: "tool_use" as const,
-            id: tu.id,
-            name: tu.name,
-            input: tu.input,
-          };
-        }),
+        content: response.content as Anthropic.ContentBlockParam[],
       });
 
       // Execute each tool call and collect results

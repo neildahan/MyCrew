@@ -409,9 +409,11 @@ async function processMessage(
     const errStack = error?.stack || "";
     console.error("Agent error:", errMsg);
     console.error("Agent error stack:", errStack);
+    // Never paste raw API errors into the user's chat: it is confusing and it
+    // leaks internals. The detail is already in the server log above.
     await sendTextMessage(
       senderId,
-      `Error: ${errMsg.substring(0, 200)}`
+      "\u05e1\u05dc\u05d9\u05d7\u05d4, \u05de\u05e9\u05d4\u05d5 \u05d4\u05e9\u05ea\u05d1\u05e9 \u05d0\u05e6\u05dc\u05d9 \u05e8\u05d2\u05e2. \u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1? \ud83d\ude4f"
     );
   }
 }
