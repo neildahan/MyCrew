@@ -4,6 +4,7 @@ import { buildSystemPrompt } from "@/lib/agents/prompt-builder";
 import { getToolsForAgent, executeToolCall } from "@/lib/tools/registry";
 import { getBudgetStatus, budgetExceededMessage } from "./budget";
 import { FALLBACK_MODEL } from "./pricing";
+import { getCrewName } from "@/lib/crew";
 import { isIntegrationConnected } from "@/lib/integrations/token-manager";
 import type { AIMessage } from "./types";
 
@@ -11,7 +12,7 @@ import type { AIMessage } from "./types";
 // than half the bill - to answer questions that rarely need it. Tasks and
 // reminders live in the database, which is the real memory; this window only
 // has to cover the current back-and-forth.
-const CONTEXT_MESSAGE_LIMIT = 8;
+const CONTEXT_MESSAGE_LIMIT = 12;
 
 interface RunAgentResult {
   response: string;
@@ -75,11 +76,14 @@ export async function runAgent(
     .from("messages")
     .select("*")
     .eq("conversation_id", conversation.id)
-    .order("created_at", { ascending: true })
+    // Newest first, then reversed below. Ascending + limit returned the
+    // OLDEST messages of the conversation, so every reply was grounded in a
+    // months-old thread instead of the one actually happening.
+    .order("created_at", { ascending: false })
     .limit(CONTEXT_MESSAGE_LIMIT);
 
-  // 5. Build messages array with history + new message
-  const messages: AIMessage[] = (history ?? []).map((m) => ({
+  // 5. Build messages array with history + new message (chronological)
+  const messages: AIMessage[] = [...(history ?? [])].reverse().map((m) => ({
     role: m.role as AIMessage["role"],
     content: m.content,
   }));
@@ -94,7 +98,11 @@ export async function runAgent(
   messages.push({ role: "user", content: `[${clockTime}] ${userMessage}` });
 
   // 6. Build system prompt
-  const systemPrompt = buildSystemPrompt(agent, skills ?? []);
+  // Who is on the other end. Appended after the stable prompt so the cached
+  // prefix stays identical for both crew members.
+  const systemPrompt =
+    buildSystemPrompt(agent, skills ?? []) +
+    `\n\nThe person you are talking to right now is ${getCrewName(whatsappUserId)}.`;
 
   // 7. Load tools for the agent
   let tools = getToolsForAgent(agentSlug);
