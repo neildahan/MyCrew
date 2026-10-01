@@ -29,8 +29,24 @@ export async function GET() {
     "https://mycrew-app.vercel.app/api/auth/callback/microsoft";
 
   if (!clientId) {
+    // Report which of the expected variables are visible - names only, never
+    // values - so a scope or spelling mistake in the dashboard is diagnosable
+    // without dashboard access.
+    const expected = [
+      "MICROSOFT_CLIENT_ID",
+      "MICROSOFT_CLIENT_SECRET",
+      "MICROSOFT_TENANT",
+      "MICROSOFT_REDIRECT_URI",
+    ];
+    const seen = Object.keys(process.env).filter((k) => k.toUpperCase().includes("MICROSOFT"));
     return NextResponse.json(
-      { error: "MICROSOFT_CLIENT_ID not configured" },
+      {
+        error: "MICROSOFT_CLIENT_ID not configured",
+        present: expected.filter((k) => !!process.env[k]),
+        missing: expected.filter((k) => !process.env[k]),
+        similar_names_seen: seen,
+        environment: process.env.VERCEL_ENV ?? "unknown",
+      },
       { status: 500 }
     );
   }
