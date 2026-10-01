@@ -1,5 +1,5 @@
 import type { WhatsAppWebhookPayload, WhatsAppIncomingMessage, WhatsAppContact } from "./types";
-import { sendTextMessage, sendAgentSelectionMenu } from "./client";
+import { sendTextMessage, sendAgentSelectionMenu, sendTypingIndicator } from "./client";
 import { runAgent, runAgentOneShot } from "@/lib/ai/agent-runner";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractTask } from "@/lib/reminders/extract";
@@ -260,6 +260,11 @@ async function processMessage(
   }
 
   if (!text) return;
+
+  // Blue ticks + "typing…" while the reply is prepared. Every path from here
+  // ends in a send, which is what dismisses it. Best-effort: a failure here
+  // must never delay or block the reply.
+  sendTypingIndicator(message.id).catch((e) => console.warn("Typing indicator:", e));
 
   const lowerText = text.toLowerCase();
 

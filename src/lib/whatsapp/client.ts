@@ -140,3 +140,28 @@ export async function sendButtonMessage(
     },
   });
 }
+
+/**
+ * Mark an inbound message as read (blue ticks) and show "typing…" to the
+ * user while the reply is prepared. WhatsApp clears it when the reply lands
+ * or after 25 seconds, so this must only be sent when a reply is coming.
+ */
+export async function sendTypingIndicator(messageId: string) {
+  const { phoneNumberId, accessToken } = getConfig();
+  const response = await fetch(`${WHATSAPP_API_URL}/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      status: "read",
+      message_id: messageId,
+      typing_indicator: { type: "text" },
+    }),
+  });
+  if (!response.ok) {
+    console.warn("Typing indicator failed:", response.status, await response.text());
+  }
+}
