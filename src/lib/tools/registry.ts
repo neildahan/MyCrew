@@ -61,11 +61,10 @@ const toolExecutors: Record<
 // Map of agent slug -> list of tool names they can use
 const agentToolMap: Record<string, string[]> = {
   yarden: [
-    "google_calendar_list_events",
-    "google_calendar_create_event",
-    "google_calendar_check_availability",
-    "gmail_read_emails",
-    "gmail_send_email",
+    // Neil's real calendar and mail are Microsoft 365 (dev@highlaw.co.il).
+    // The Google tools are deliberately NOT here: the only connected Google
+    // account is an empty throwaway, and offering both made her pick Google
+    // and then report "your calendar isn't connected".
     "web_search",
     "web_fetch",
     "tasks_list_mine",
