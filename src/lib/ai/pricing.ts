@@ -18,7 +18,8 @@ export const MODEL_PRICING: Record<string, ModelRate> = {
   "claude-sonnet-5": { input: 2, output: 10, cacheWrite: 2.5, cacheRead: 0.2 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.3 },
   "claude-haiku-4-5": { input: 1, output: 5, cacheWrite: 1.25, cacheRead: 0.1 },
-  // Gemini, for the agents that still use it.
+  // Gemini is no longer used by any agent; kept so old usage_logs rows
+  // still price correctly rather than falling through to the Opus rate.
   "gemini-2.5-flash": { input: 0.3, output: 2.5, cacheWrite: 0.375, cacheRead: 0.03 },
 };
 

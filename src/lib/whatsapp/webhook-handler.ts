@@ -130,10 +130,9 @@ async function isCrewMode(whatsappUserId: string): Promise<boolean> {
 
 // Get the best available provider for crew mode (prefers Anthropic, falls back to Gemini)
 function getCrewProvider() {
-  if (process.env.ANTHROPIC_API_KEY) {
-    return getProvider("anthropic", "claude-sonnet-4-6");
-  }
-  return getProvider("gemini", "gemini-2.5-flash");
+  // Gemini is no longer a fallback: that key is dead, and failing here with a
+  // clear "missing ANTHROPIC_API_KEY" beats a confusing 400 from Google.
+  return getProvider("anthropic", "claude-sonnet-5");
 }
 
 const CREW_SYSTEM_PROMPT = `You are simulating a team meeting. You MUST respond with exactly 3 sections, one per team member. Each section is 2-3 sentences.
