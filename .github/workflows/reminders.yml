@@ -2,15 +2,18 @@ name: Fire due reminders
 
 # Vercel's Hobby plan allows one cron per day, but reminders need checking
 # every few minutes to land near their remind_at time. GitHub Actions has a
-# 5-minute floor and is free on public repos, so the schedule lives here and
-# simply calls the app's own endpoint.
+# 5-minute floor and is free on public repos.
+#
+# The job talks to Supabase and WhatsApp directly rather than calling the app's
+# cron route: that route is guarded by a shared secret, and keeping that secret
+# in sync across two dashboards is exactly what kept reminders from ever firing.
 #
 # Note: GitHub may delay scheduled runs under load, and disables schedules on
 # repos with no activity for 60 days.
 on:
   schedule:
     - cron: "*/5 * * * *"
-  workflow_dispatch: # lets you fire it by hand from the Actions tab
+  workflow_dispatch:
 
 concurrency:
   # Never let a slow run overlap the next tick and send a reminder twice.
@@ -22,28 +25,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Call the reminders endpoint
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Send due reminders
         env:
-          CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
-          if [ -z "$CRON_SECRET" ]; then
-            echo "::error::CRON_SECRET repository secret is not set"
-            exit 1
-          fi
-
-          response=$(curl -sS --max-time 60 -w "\n%{http_code}" \
-            -H "Authorization: Bearer $CRON_SECRET" \
-            "https://mycrew-app.vercel.app/api/cron/reminders")
-
-          body=$(echo "$response" | sed '$d')
-          code=$(echo "$response" | tail -n1)
-
-          echo "HTTP $code"
-          echo "$body"
-
-          # A non-2xx here means reminders are silently not being delivered,
-          # which is the one failure mode that must never pass unnoticed.
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "::error::Reminder run failed with HTTP $code"
-            exit 1
-          fi
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+        run: node scripts/send-reminders.mjs
