@@ -10,7 +10,8 @@
     "lint": "next lint",
     "whatsapp": "node worker/whatsapp.mjs",
     "whatsapp:groups": "LIST_GROUPS=1 node worker/whatsapp.mjs",
-    "whatsapp:pair": "node worker/whatsapp.mjs"
+    "whatsapp:pair": "node worker/whatsapp.mjs",
+    "postinstall": "patch-package"
   },
   "keywords": [],
   "author": "",
@@ -43,5 +44,8 @@
     "tailwindcss": "^3.4.19",
     "typescript": "^5.9.3",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
   }
 }

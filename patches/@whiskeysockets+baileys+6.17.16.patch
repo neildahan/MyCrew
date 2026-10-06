@@ -1,0 +1,83 @@
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js b/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js
+index e9d112c..1058ea2 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js
+@@ -454,6 +454,10 @@ const makeSocket = (config) => {
+     ws.on('close', () => end(new boom_1.Boom('Connection Terminated', { statusCode: Types_1.DisconnectReason.connectionClosed })));
+     // the server terminated the connection
+     ws.on('CB:xmlstreamend', () => end(new boom_1.Boom('Connection Terminated by Server', { statusCode: Types_1.DisconnectReason.connectionClosed })));
++    // Re-render the QR currently on screen. Set while a pairing QR flow is live
++    // on this connection, undefined otherwise. See the companion_reg_refresh
++    // handler below.
++    let refreshPairingQR;
+     // QR gen
+     ws.on('CB:iq,type:set,pair-device', async (stanza) => {
+         const iq = {
+@@ -469,8 +473,18 @@ const makeSocket = (config) => {
+         const refNodes = (0, WABinary_1.getBinaryNodeChildren)(pairDeviceNode, 'ref');
+         const noiseKeyB64 = Buffer.from(creds.noiseKey.public).toString('base64');
+         const identityKeyB64 = Buffer.from(creds.signedIdentityKey.public).toString('base64');
+-        const advB64 = creds.advSecretKey;
+         let qrMs = qrTimeout || 60000; // time to let a QR live
++        let currentRef;
++        // advSecretKey is read HERE, at render time, rather than captured once
++        // above: a companion_reg_refresh rotates it mid-flow, and a QR carrying
++        // the stale secret can never complete pairing.
++        const renderPairQR = () => {
++            if (!ws.isOpen || !currentRef) {
++                return;
++            }
++            const qr = [currentRef, noiseKeyB64, identityKeyB64, creds.advSecretKey].join(',');
++            ev.emit('connection.update', { qr });
++        };
+         const genPairQR = () => {
+             if (!ws.isOpen) {
+                 return;
+@@ -480,14 +494,44 @@ const makeSocket = (config) => {
+                 end(new boom_1.Boom('QR refs attempts ended', { statusCode: Types_1.DisconnectReason.timedOut }));
+                 return;
+             }
+-            const ref = refNode.content.toString('utf-8');
+-            const qr = [ref, noiseKeyB64, identityKeyB64, advB64].join(',');
+-            ev.emit('connection.update', { qr });
++            currentRef = refNode.content.toString('utf-8');
++            renderPairQR();
+             qrTimer = setTimeout(genPairQR, qrMs);
+             qrMs = qrTimeout || 20000; // shorter subsequent qrs
+         };
++        refreshPairingQR = renderPairQR;
+         genPairQR();
+     });
++    // Since 2026-07-28 WhatsApp rotates the advertisement secret part-way
++    // through pairing and announces it with this notification. Stock 6.17.16
++    // acks and discards it, so the QR on screen keeps the old secret,
++    // pair-success never arrives, the ref pool drains, and the phone reports
++    // "Couldn't link device - try connection again".
++    //
++    // Rotate the secret to match and re-render the SAME ref: a new ref would
++    // burn one from a small pool for no reason. Upstream fix: Baileys #2765.
++    ws.on('CB:notification,type:companion_reg_refresh', (node) => {
++        try {
++            // Only meaningful while unpaired. On an established session this
++            // would throw away a working secret.
++            if (creds.me) {
++                return;
++            }
++            const child = (0, WABinary_1.getBinaryNodeChild)(node, 'companion_reg_refresh')
++                || (0, WABinary_1.getBinaryNodeChild)(node, 'pair-device-rotate-qr');
++            if (!child) {
++                logger.debug({ node }, 'companion_reg_refresh without a known child, ignoring');
++                return;
++            }
++            creds.advSecretKey = crypto_1.randomBytes(32).toString('base64');
++            ev.emit('creds.update', { advSecretKey: creds.advSecretKey });
++            logger.info('companion_reg_refresh: rotated advSecretKey, re-rendering QR');
++            refreshPairingQR?.();
++        }
++        catch (error) {
++            logger.warn({ error }, 'failed to handle companion_reg_refresh');
++        }
++    });
+     // device paired for the first time
+     // if device pairs successfully, the server asks to restart the connection
+     ws.on('CB:iq,,pair-success', async (stanza) => {
