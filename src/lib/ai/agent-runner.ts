@@ -105,7 +105,7 @@ export async function runAgent(
     `\n\nThe person you are talking to right now is ${await getCrewName(whatsappUserId)}.`;
 
   // 7. Load tools for the agent
-  let tools = getToolsForAgent(agentSlug);
+  let tools = await getToolsForAgent(agentSlug, whatsappUserId);
   let toolExecutor: ((name: string, args: Record<string, unknown>) => Promise<unknown>) | undefined;
 
   if (tools.length > 0) {

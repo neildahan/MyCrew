@@ -36,6 +36,7 @@ import {
   outlookCheckAvailabilityDefinition,
   outlookCheckAvailabilityExecutor,
 } from "./outlook-calendar";
+import { getComposioTools, executeComposioTool, isComposioTool } from "./composio";
 
 // Map of tool name -> executor function
 const toolExecutors: Record<
@@ -104,13 +105,17 @@ const toolDefinitions: Record<string, ToolDefinition> = {
 /**
  * Get the tool definitions for a given agent.
  */
-export function getToolsForAgent(agentSlug: string): ToolDefinition[] {
+export async function getToolsForAgent(
+  agentSlug: string,
+  userId?: string
+): Promise<ToolDefinition[]> {
   const toolNames = agentToolMap[agentSlug];
-  if (!toolNames) return [];
+  const builtIn = (toolNames ?? []).map((name) => toolDefinitions[name]).filter(Boolean);
 
-  return toolNames
-    .map((name) => toolDefinitions[name])
-    .filter(Boolean);
+  // Composio tools are fetched per person, since each crew member connects
+  // their own mailbox. Yarden is the only agent that acts on your accounts.
+  if (!userId || agentSlug !== "yarden") return builtIn;
+  return [...builtIn, ...(await getComposioTools(userId))];
 }
 
 /**
@@ -122,6 +127,16 @@ export async function executeToolCall(
   context?: ToolContext
 ): Promise<unknown> {
   const executor = toolExecutors[toolName];
+
+  // Composio tool slugs are upper snake case and are registered dynamically,
+  // so they never appear in the static map above.
+  if (!executor && isComposioTool(toolName)) {
+    if (!context?.whatsappUserId) {
+      return { error: "Composio tools need a known caller." };
+    }
+    return executeComposioTool(toolName, args, context.whatsappUserId);
+  }
+
   if (!executor) {
     return { error: `Unknown tool: ${toolName}` };
   }
