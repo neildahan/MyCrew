@@ -3,6 +3,7 @@ import { getDigestTasks } from "@/lib/reminders/save";
 import { sendTextMessage } from "@/lib/whatsapp/client";
 import { getCrewNumbers } from "@/lib/crew";
 import { DEFAULT_TIMEZONE, dayOfWeekIn, endOfDayUtc } from "@/lib/time";
+import { getSpendReport, formatUsd } from "@/lib/ai/budget";
 
 export const dynamic = "force-dynamic";
 
@@ -32,9 +33,9 @@ type DigestTask = {
   requested_by: string | null;
 };
 
-function buildDigest(tasks: DigestTask[], now: Date): string {
+function buildDigest(tasks: DigestTask[], now: Date, footer: string): string {
   if (tasks.length === 0) {
-    return "☀️ *בוקר טוב*\n\nאין משימות פתוחות להיום. נקי.";
+    return "☀️ *בוקר טוב*\n\nאין משימות פתוחות להיום. נקי." + footer;
   }
 
   const nowMs = now.getTime();
@@ -61,7 +62,30 @@ function buildDigest(tasks: DigestTask[], now: Date): string {
     }
   }
 
-  return lines.join("\n");
+  return lines.join("\n") + footer;
+}
+
+/**
+ * Yesterday's spend, appended to the digest. A cap that only speaks up once it
+ * has already been hit is not visibility; this is the daily number.
+ */
+async function buildCostFooter(): Promise<string> {
+  try {
+    const r = await getSpendReport(7);
+    const parts = [
+      "",
+      "—",
+      `💰 אתמול: ${formatUsd(r.yesterday.cost)} · החודש: ${formatUsd(r.monthToDate)}/${formatUsd(r.budget)}`,
+    ];
+    if (r.projectedMonth > r.budget && r.dailyAverage > 0) {
+      parts.push(`⚠️ בקצב הזה החודש ייגמר ב-${formatUsd(r.projectedMonth)}`);
+    }
+    return parts.join("\n");
+  } catch (error) {
+    // The digest is the point; the cost line is a nice-to-have.
+    console.error("Could not build the cost footer:", error);
+    return "";
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -101,13 +125,14 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const costFooter = await buildCostFooter();
   const cutoff = endOfDayUtc(now, TIMEZONE).toISOString();
   const results: Array<{ to: string; tasks: number; digest?: string; error?: string }> = [];
 
   for (const number of crew) {
     try {
       const tasks = (await getDigestTasks(number, cutoff)) as DigestTask[];
-      const digest = buildDigest(tasks, now);
+      const digest = buildDigest(tasks, now, costFooter);
 
       if (dryRun) {
         results.push({ to: number, tasks: tasks.length, digest });

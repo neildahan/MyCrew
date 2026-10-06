@@ -6,6 +6,10 @@ import { extractTask } from "@/lib/reminders/extract";
 import { saveTask } from "@/lib/reminders/save";
 import { getProvider } from "@/lib/ai/provider-registry";
 import { isCrewMember } from "@/lib/crew";
+import { getSpendReport, formatUsd } from "@/lib/ai/budget";
+
+const SWITCH_FAILED =
+  "\u05dc\u05d0 \u05d4\u05e6\u05dc\u05d7\u05ea\u05d9 \u05dc\u05d4\u05d7\u05dc\u05d9\u05e3. \u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1 \u05d1\u05e2\u05d5\u05d3 \u05e8\u05d2\u05e2. \ud83d\ude4f";
 
 const AGENT_COMMANDS: Record<string, string> = {
   "/yarden": "yarden",
@@ -31,32 +35,92 @@ const AGENT_NAMES: Record<string, string> = {
   james: "Yoav (Business Advisor)",
 };
 
+/**
+ * What the assistant has cost, day by day. Spend is invisible otherwise:
+ * the cap only speaks up once it has already been hit.
+ */
+async function buildCostReport(): Promise<string> {
+  const r = await getSpendReport(7);
+
+  const dayName = (iso: string) =>
+    new Date(`${iso}T12:00:00Z`).toLocaleDateString("he-IL", {
+      weekday: "short",
+      day: "numeric",
+      month: "numeric",
+    });
+
+  const lines = [
+    "\ud83d\udcb0 *עלויות*",
+    "",
+    `היום: ${formatUsd(r.today.cost)} (${r.today.messages} הודעות)`,
+    `אתמול: ${formatUsd(r.yesterday.cost)} (${r.yesterday.messages} הודעות)`,
+    "",
+    "*7 ימים אחרונים*",
+  ];
+
+  for (const d of r.recent) {
+    lines.push(
+      d.messages === 0
+        ? `• ${dayName(d.date)} — —`
+        : `• ${dayName(d.date)} — ${formatUsd(d.cost)} (${d.messages})`
+    );
+  }
+
+  lines.push(
+    "",
+    `החודש: ${formatUsd(r.monthToDate)} מתוך ${formatUsd(r.budget)}`,
+    `נשאר: ${formatUsd(r.remaining)}`
+  );
+
+  // Only worth saying when it actually threatens the cap.
+  if (r.projectedMonth > r.budget && r.dailyAverage > 0) {
+    lines.push(`\u26a0\ufe0f בקצב הזה החודש ייגמר ב-${formatUsd(r.projectedMonth)}`);
+  }
+
+  return lines.join("\n");
+}
+
 async function getActiveAgent(whatsappUserId: string): Promise<string | null> {
   const supabase = createAdminClient();
+  // maybeSingle: a first-time user has no row, and single() treats that as an
+  // error rather than as "not chosen yet".
   const { data } = await supabase
     .from("settings")
     .select("value")
     .eq("key", `active_agent_${whatsappUserId}`)
-    .single();
+    .maybeSingle();
 
   return data?.value || null;
 }
 
-async function setActiveAgent(whatsappUserId: string, agentSlug: string) {
+/**
+ * Returns whether the switch actually happened.
+ *
+ * This used to read-then-insert-or-update on a column named `id`. The settings
+ * table is keyed on `key` and has no `id`, so the read always errored, the
+ * code always took the insert branch, and the insert always hit the primary
+ * key. Neither error was checked, so every /dana and /yoav confirmed happily
+ * and left the user talking to Yarden. One upsert on the real key, and the
+ * caller only confirms when the write succeeded.
+ */
+async function setActiveAgent(
+  whatsappUserId: string,
+  agentSlug: string
+): Promise<boolean> {
   const supabase = createAdminClient();
-  const key = `active_agent_${whatsappUserId}`;
 
-  const { data: existing } = await supabase
+  const { error } = await supabase
     .from("settings")
-    .select("id")
-    .eq("key", key)
-    .single();
+    .upsert(
+      { key: `active_agent_${whatsappUserId}`, value: agentSlug },
+      { onConflict: "key" }
+    );
 
-  if (existing) {
-    await supabase.from("settings").update({ value: agentSlug }).eq("key", key);
-  } else {
-    await supabase.from("settings").insert({ key, value: agentSlug });
+  if (error) {
+    console.error(`Could not switch ${whatsappUserId} to ${agentSlug}:`, error);
+    return false;
   }
+  return true;
 }
 
 async function isCrewMode(whatsappUserId: string): Promise<boolean> {
@@ -251,8 +315,13 @@ async function processMessage(
     if (reply) {
       const agentSlug = AGENT_SELECTION_MAP[reply.id];
       if (agentSlug) {
-        await setActiveAgent(senderId, agentSlug);
-        await sendTextMessage(senderId, `Switched to *${AGENT_NAMES[agentSlug]}*! How can I help you?`);
+        const switched = await setActiveAgent(senderId, agentSlug);
+        await sendTextMessage(
+          senderId,
+          switched
+            ? `Switched to *${AGENT_NAMES[agentSlug]}*! How can I help you?`
+            : SWITCH_FAILED
+        );
         return;
       }
       text = reply.title;
@@ -270,7 +339,10 @@ async function processMessage(
 
   // Check for crew mode command
   if (lowerText === "/crew" || lowerText === "/all" || lowerText === "/team") {
-    await setActiveAgent(senderId, "crew");
+    if (!(await setActiveAgent(senderId, "crew"))) {
+      await sendTextMessage(senderId, SWITCH_FAILED);
+      return;
+    }
     await sendTextMessage(
       senderId,
       "\ud83e\udd1d *Crew mode activated!*\n\nAll three agents will respond to your messages.\n\n\ud83d\udccb Yarden \u00b7 \ud83d\udcf1 Dana \u00b7 \ud83d\udcbc Yoav\n\nType /yarden, /dana, or /yoav to switch back to a single agent."
@@ -281,8 +353,17 @@ async function processMessage(
   // Check for agent switch commands
   const commandAgent = AGENT_COMMANDS[lowerText];
   if (commandAgent) {
-    await setActiveAgent(senderId, commandAgent);
+    if (!(await setActiveAgent(senderId, commandAgent))) {
+      await sendTextMessage(senderId, SWITCH_FAILED);
+      return;
+    }
     await sendTextMessage(senderId, `Switched to *${AGENT_NAMES[commandAgent]}*! How can I help you?`);
+    return;
+  }
+
+  // Check for the cost report
+  if (lowerText === "/cost" || lowerText === "/עלות" || lowerText === "/spend") {
+    await sendTextMessage(senderId, await buildCostReport());
     return;
   }
 
