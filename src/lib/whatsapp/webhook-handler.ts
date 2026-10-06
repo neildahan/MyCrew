@@ -237,7 +237,7 @@ async function processMessage(
   // Allowlist gate. Anyone not in the crew is dropped without a reply: a reply
   // would confirm to a stranger that this number runs a bot, and every message
   // past this point spends the Anthropic key.
-  if (!isCrewMember(senderId)) {
+  if (!(await isCrewMember(senderId))) {
     console.warn(`Rejected message from non-crew sender: ${senderId}`);
     return;
   }

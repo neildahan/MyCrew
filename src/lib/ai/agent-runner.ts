@@ -102,7 +102,7 @@ export async function runAgent(
   // prefix stays identical for both crew members.
   const systemPrompt =
     buildSystemPrompt(agent, skills ?? []) +
-    `\n\nThe person you are talking to right now is ${getCrewName(whatsappUserId)}.`;
+    `\n\nThe person you are talking to right now is ${await getCrewName(whatsappUserId)}.`;
 
   // 7. Load tools for the agent
   let tools = getToolsForAgent(agentSlug);

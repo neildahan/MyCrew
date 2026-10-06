@@ -28,7 +28,7 @@ type TaskRow = {
   whatsapp_user_id: string;
 };
 
-function present(task: TaskRow) {
+async function present(task: TaskRow) {
   return {
     id: task.id,
     title: task.title,
@@ -36,8 +36,8 @@ function present(task: TaskRow) {
     status: task.status,
     priority: task.priority,
     due_at: task.due_at ?? undefined,
-    requested_by: task.requested_by ? getCrewName(task.requested_by) : undefined,
-    owner: getCrewName(task.whatsapp_user_id),
+    requested_by: task.requested_by ? await getCrewName(task.requested_by) : undefined,
+    owner: await getCrewName(task.whatsapp_user_id),
   };
 }
 
@@ -146,7 +146,7 @@ export async function listMyTasksExecutor(
     ? tasks
     : tasks.filter((t) => t.status !== "completed");
 
-  return { count: visible.length, tasks: visible.map(present) };
+  return { count: visible.length, tasks: await Promise.all(visible.map(present)) };
 }
 
 export async function listOwedTasksExecutor(
@@ -154,7 +154,7 @@ export async function listOwedTasksExecutor(
   context?: ToolContext
 ) {
   const me = requireContext(context);
-  const other = getOtherMember(me);
+  const other = await getOtherMember(me);
 
   if (!other) {
     return {
@@ -173,9 +173,9 @@ export async function listOwedTasksExecutor(
 
   return {
     direction,
-    other_person: getCrewName(other),
+    other_person: await getCrewName(other),
     count: tasks.length,
-    tasks: tasks.map(present),
+    tasks: await Promise.all(tasks.map(present)),
   };
 }
 
@@ -184,7 +184,7 @@ export async function assignTaskExecutor(
   context?: ToolContext
 ) {
   const me = requireContext(context);
-  const other = getOtherMember(me);
+  const other = await getOtherMember(me);
 
   if (!other) {
     return {
@@ -210,8 +210,8 @@ export async function assignTaskExecutor(
 
   return {
     created: true,
-    assigned_to: getCrewName(other),
-    task: present(task as TaskRow),
+    assigned_to: await getCrewName(other),
+    task: await present(task as TaskRow),
   };
 }
 

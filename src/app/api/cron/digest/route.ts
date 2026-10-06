@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const crew = getCrewNumbers();
+  const crew = await getCrewNumbers();
   if (crew.length === 0) {
     return NextResponse.json(
       { error: "CREW_WHATSAPP_NUMBERS is not set" },
