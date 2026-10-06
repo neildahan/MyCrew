@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getMicrosoftConfig, getMicrosoftConfigStatus } from "@/lib/integrations/microsoft-config";
 
 /**
  * Calendars.ReadBasic, not Calendars.Read.
@@ -22,30 +23,14 @@ const SCOPES = [
 ].join(" ");
 
 export async function GET() {
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const tenant = process.env.MICROSOFT_TENANT ?? "common";
-  const redirectUri =
-    process.env.MICROSOFT_REDIRECT_URI ??
-    "https://mycrew-app.vercel.app/api/auth/callback/microsoft";
+  const { clientId, tenant, redirectUri } = await getMicrosoftConfig();
 
   if (!clientId) {
-    // Report which of the expected variables are visible - names only, never
-    // values - so a scope or spelling mistake in the dashboard is diagnosable
-    // without dashboard access.
-    const expected = [
-      "MICROSOFT_CLIENT_ID",
-      "MICROSOFT_CLIENT_SECRET",
-      "MICROSOFT_TENANT",
-      "MICROSOFT_REDIRECT_URI",
-    ];
-    const seen = Object.keys(process.env).filter((k) => k.toUpperCase().includes("MICROSOFT"));
     return NextResponse.json(
       {
-        error: "MICROSOFT_CLIENT_ID not configured",
-        present: expected.filter((k) => !!process.env[k]),
-        missing: expected.filter((k) => !process.env[k]),
-        similar_names_seen: seen,
-        environment: process.env.VERCEL_ENV ?? "unknown",
+        error: "Microsoft is not configured",
+        status: await getMicrosoftConfigStatus(),
+        hint: "Set microsoft_client_id and microsoft_client_secret in the settings table.",
       },
       { status: 500 }
     );

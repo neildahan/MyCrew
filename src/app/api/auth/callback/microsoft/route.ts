@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { saveTokens } from "@/lib/integrations/token-manager";
+import { getMicrosoftConfig } from "@/lib/integrations/microsoft-config";
 
 const GRAPH_ME_URL = "https://graph.microsoft.com/v1.0/me";
 
@@ -24,12 +25,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-  const tenant = process.env.MICROSOFT_TENANT ?? "common";
-  const redirectUri =
-    process.env.MICROSOFT_REDIRECT_URI ??
-    "https://mycrew-app.vercel.app/api/auth/callback/microsoft";
+  const { clientId, clientSecret, tenant, redirectUri } = await getMicrosoftConfig();
 
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(

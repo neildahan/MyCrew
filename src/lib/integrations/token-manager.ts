@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Integration } from "@/types/database";
+import { getMicrosoftConfig } from "./microsoft-config";
 
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 minutes before expiry
 
@@ -49,12 +50,10 @@ export async function getValidToken(provider: string): Promise<string | null> {
 async function refreshMicrosoftToken(
   integration: Integration
 ): Promise<string | null> {
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const clientSecret = process.env.MICROSOFT_CLIENT_SECRET;
-  const tenant = process.env.MICROSOFT_TENANT ?? "common";
+  const { clientId, clientSecret, tenant } = await getMicrosoftConfig();
 
   if (!clientId || !clientSecret) {
-    console.error("Missing MICROSOFT_CLIENT_ID or MICROSOFT_CLIENT_SECRET");
+    console.error("Microsoft client id/secret are not configured");
     return null;
   }
 
