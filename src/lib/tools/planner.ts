@@ -279,3 +279,127 @@ export async function plannerCompleteExecutor(args: Record<string, unknown>) {
 
   return { completed: completed.length, completed_ids: completed, failed };
 }
+
+// --- Updating an existing task ---
+
+/**
+ * Planner's progress is a percentage, but the board only renders three states:
+ * 0 is "Not started", anything between is "In progress", 100 is "Completed".
+ */
+const PROGRESS: Record<string, number> = {
+  not_started: 0,
+  in_progress: 50,
+  done: DONE,
+};
+
+interface TaskDetails {
+  description?: string;
+  "@odata.etag"?: string;
+}
+
+export const plannerUpdateDefinition: ToolDefinition = {
+  name: "planner_update_task",
+  description:
+    "Update an EXISTING Planner task: add a note to it, move it to in-progress, change its due date or retitle it. Use this whenever asked to record something about a task that already exists - 'תרשמי בתוך המשימה', 'add a note', 'move it to in progress', 'תעבירי לבתהליך'. Do NOT create a second task for an update to an existing one.",
+  parameters: {
+    type: "object",
+    properties: {
+      task_id: {
+        type: "string",
+        description: "The task to update. Get it from planner_list_tasks.",
+      },
+      note: {
+        type: "string",
+        description:
+          "Text to record in the task's Notes. Added underneath whatever is already there, with today's date, so the notes read as a running log.",
+      },
+      replace_notes: {
+        type: "boolean",
+        description:
+          "Overwrite the existing notes instead of adding to them. Defaults to false - only use when explicitly asked to rewrite them.",
+      },
+      progress: {
+        type: "string",
+        enum: ["not_started", "in_progress", "done"],
+        description: "Move the task to this state. Optional.",
+      },
+      due: { type: "string", description: "New due date, YYYY-MM-DD. Optional." },
+      title: { type: "string", description: "New title. Optional." },
+    },
+    required: ["task_id"],
+  },
+};
+
+export async function plannerUpdateExecutor(args: Record<string, unknown>) {
+  const id = typeof args.task_id === "string" ? args.task_id.trim() : "";
+  if (!id) return { error: "A task_id is required." };
+
+  const changed: string[] = [];
+
+  // The task itself and its details are separate resources with separate
+  // etags, so progress/due/title and the notes are two different writes.
+  const fields: Record<string, unknown> = {};
+  if (typeof args.title === "string" && args.title.trim()) {
+    fields.title = args.title.trim();
+    changed.push("title");
+  }
+  if (typeof args.due === "string" && /^\d{4}-\d{2}-\d{2}$/.test(args.due)) {
+    fields.dueDateTime = `${args.due}T20:59:59.000Z`;
+    changed.push("due date");
+  }
+  if (typeof args.progress === "string" && args.progress in PROGRESS) {
+    fields.percentComplete = PROGRESS[args.progress];
+    changed.push(args.progress.replace("_", " "));
+  }
+
+  if (Object.keys(fields).length > 0) {
+    const current = await graph<PlannerTask>(`/planner/tasks/${id}`);
+    if (!current.ok || !current.etag) {
+      return { error: current.error ?? "Could not read that task." };
+    }
+    const res = await graph(`/planner/tasks/${id}`, {
+      method: "PATCH",
+      headers: { "If-Match": current.etag },
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) return { error: res.error ?? "Could not update the task." };
+  }
+
+  const note = typeof args.note === "string" ? args.note.trim() : "";
+  if (note) {
+    const details = await graph<TaskDetails>(`/planner/tasks/${id}/details`);
+    if (!details.ok || !details.etag) {
+      return { error: details.error ?? "Could not read the task's notes." };
+    }
+
+    const existing = details.data?.description ?? "";
+    const stamp = new Date().toLocaleDateString("he-IL", {
+      timeZone: "Asia/Jerusalem",
+      day: "numeric",
+      month: "numeric",
+    });
+    // Appending by default: a note about a task is usually one more thing that
+    // happened, not a correction of what was there before.
+    const description =
+      args.replace_notes === true || !existing
+        ? `${stamp}: ${note}`
+        : `${existing}\n${stamp}: ${note}`;
+
+    const res = await graph(`/planner/tasks/${id}/details`, {
+      method: "PATCH",
+      headers: { "If-Match": details.etag },
+      body: JSON.stringify({ description }),
+    });
+    if (!res.ok) return { error: res.error ?? "Could not save the note." };
+    changed.push("note");
+  }
+
+  if (changed.length === 0) return { error: "Nothing to change was given." };
+
+  const after = await graph<PlannerTask>(`/planner/tasks/${id}`);
+  return {
+    updated: true,
+    changed,
+    task: after.ok && after.data ? await present(after.data) : undefined,
+  };
+}
