@@ -36,6 +36,14 @@ import {
   outlookCheckAvailabilityDefinition,
   outlookCheckAvailabilityExecutor,
 } from "./outlook-calendar";
+import {
+  plannerListDefinition,
+  plannerListExecutor,
+  plannerCreateDefinition,
+  plannerCreateExecutor,
+  plannerCompleteDefinition,
+  plannerCompleteExecutor,
+} from "./planner";
 import { getComposioTools, executeComposioTool, isComposioTool } from "./composio";
 
 // Map of tool name -> executor function
@@ -56,6 +64,9 @@ const toolExecutors: Record<
   tasks_complete: completeTaskExecutor,
   outlook_list_events: outlookListEventsExecutor,
   outlook_check_availability: outlookCheckAvailabilityExecutor,
+  planner_list_tasks: plannerListExecutor,
+  planner_create_task: plannerCreateExecutor,
+  planner_complete_task: plannerCompleteExecutor,
 };
 
 // Map of agent slug -> list of tool names they can use
@@ -67,12 +78,15 @@ const agentToolMap: Record<string, string[]> = {
     // and then report "your calendar isn't connected".
     "web_search",
     "web_fetch",
-    "tasks_list_mine",
-    "tasks_list_owed",
-    "tasks_assign",
-    "tasks_complete",
+    // The local task tools are deliberately NOT here. Planner is where Neil
+    // and ענבל actually work, and an assistant keeping a second list would
+    // answer "what's open?" differently from the board they look at. The
+    // table stays for reminder scheduling, which Planner has no concept of.
     "outlook_list_events",
     "outlook_check_availability",
+    "planner_list_tasks",
+    "planner_create_task",
+    "planner_complete_task",
   ],
   dana: [
     "web_search",
@@ -99,6 +113,9 @@ const toolDefinitions: Record<string, ToolDefinition> = {
   tasks_complete: completeTaskDefinition,
   outlook_list_events: outlookListEventsDefinition,
   outlook_check_availability: outlookCheckAvailabilityDefinition,
+  planner_list_tasks: plannerListDefinition,
+  planner_create_task: plannerCreateDefinition,
+  planner_complete_task: plannerCompleteDefinition,
 };
 
 /**

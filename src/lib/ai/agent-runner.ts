@@ -122,7 +122,10 @@ export async function runAgent(
     const ownsIntegrations = await mayUseSharedIntegrations(whatsappUserId);
     if (!microsoftConnected || !ownsIntegrations) {
       // Offering a calendar tool that always errors just wastes turns.
-      tools = tools.filter(t => !t.name.startsWith("outlook_"));
+      // Planner rides on the same Microsoft token, so it goes with them.
+      tools = tools.filter(
+        t => !t.name.startsWith("outlook_") && !t.name.startsWith("planner_")
+      );
     }
     if (tools.length > 0) {
       // Bind the sender's identity here so task tools cannot be told
