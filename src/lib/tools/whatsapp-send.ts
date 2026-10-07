@@ -45,7 +45,7 @@ function writtenAs(to: string): string[] {
       forms.add(`0${national}`);
     }
   }
-  return [...forms];
+  return Array.from(forms);
 }
 
 const sentToday = new Map<string, number[]>();
