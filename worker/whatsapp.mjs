@@ -28,6 +28,7 @@ const {
 } = baileys;
 const makeWASocket = makeWASocketDefault ?? baileys;
 import qrcode from "qrcode-terminal";
+import qrpng from "qrcode";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -63,6 +64,8 @@ const AUTH_DIR = path.join(projectRoot, ".whatsapp-auth");
  * -> "Link with phone number instead".
  */
 const PAIR_NUMBER = (process.env.PAIR_NUMBER ?? "").replace(/[^0-9]/g, "");
+/** Write each QR to this path as a PNG, for sending to the person pairing. */
+const QR_PNG = process.env.QR_PNG ?? "";
 
 if (!SECRET) {
   console.error("AGENT_API_SECRET is not set. Add it to .env.local and to Vercel.");
@@ -135,9 +138,32 @@ async function start() {
     // generic "Couldn't link device" while the socket sees no error at all.
     browser: Browsers.macOS("Desktop"),
     markOnlineOnConnect: false,
+    // Default is 60s for the first QR and 20s for each one after. That is far
+    // too short when the QR has to travel to whoever is holding the phone:
+    // it has already expired by the time they open it. Each refresh also burns
+    // one of a small pool of refs, so slower rotation makes the pool last.
+    qrTimeout: 120_000,
   });
 
   sock.ev.on("creds.update", saveCreds);
+
+  // DEBUG_FRAMES=1 logs every node WhatsApp sends. Pairing fails silently -
+  // the phone says "Couldn't link device" while the socket reports nothing at
+  // all - so without this there is nothing to diagnose from.
+  if (process.env.DEBUG_FRAMES) {
+    sock.ws.on("frame", (frame) => {
+      if (!frame?.tag) return;
+      const attrs = frame.attrs ?? {};
+      const kids = (frame.content ?? [])
+        .map((c) => (typeof c === "object" && c?.tag ? c.tag : null))
+        .filter(Boolean);
+      console.log(
+        `[frame] <${frame.tag}${Object.entries(attrs)
+          .map(([k, v]) => ` ${k}="${v}"`)
+          .join("")}>` + (kids.length ? `  children: ${kids.join(", ")}` : "")
+      );
+    });
+  }
 
   // Must be requested after the socket exists but before it is registered.
   if (PAIR_NUMBER && !sock.authState.creds.registered) {
@@ -169,6 +195,16 @@ async function start() {
     if (qr && !PAIR_NUMBER) {
       console.log("\nScan this with WhatsApp -> Settings -> Linked Devices -> Link a device\n");
       qrcode.generate(qr, { small: true });
+
+      // Also write a PNG. A terminal QR is unscannable when whoever runs this
+      // is not the person holding the phone, and each refresh overwrites the
+      // same path so the file always holds the QR currently valid.
+      if (QR_PNG) {
+        qrpng
+          .toFile(QR_PNG, qr, { width: 512, margin: 2 })
+          .then(() => console.log(`[qr] written to ${QR_PNG} at ${new Date().toLocaleTimeString()}`))
+          .catch((e) => console.warn("[qr] could not write PNG:", e.message));
+      }
     }
 
     if (connection === "open") {
@@ -189,6 +225,17 @@ async function start() {
         fs.rmSync(AUTH_DIR, { recursive: true, force: true });
         console.log(`\nLogged out (${code}). Session cleared - run again to pair.\n`);
         process.exit(1);
+      }
+
+      // 515 is restartRequired, and it is what SUCCESS looks like: WhatsApp
+      // ends the stream immediately after pair-success and expects the client
+      // to come back with the credentials it just saved. Treating it as a
+      // failure deleted a pairing that had actually worked - the socket logged
+      // pair-success one frame earlier.
+      if (code === DisconnectReason.restartRequired) {
+        console.log("\nPaired. Restarting the connection...\n");
+        start();
+        return;
       }
 
       if (!registered) {
