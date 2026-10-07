@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/ui/toast";
-import { CheckCircle, XCircle, Clock, AlertTriangle } from "lucide-react";
+import { CheckCircle, XCircle, Clock, AlertTriangle, Trash2 } from "lucide-react";
 import type { Task } from "@/types/database";
 
 const AGENT_INFO: Record<string, { emoji: string; name: string }> = {
@@ -67,6 +67,24 @@ export default function TasksPage() {
   useEffect(() => {
     loadTasks();
   }, [agentFilter, statusFilter]);
+
+  // Which task is one click away from being deleted. Deleting is permanent
+  // and there is no undo, so the first click only arms the button.
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+
+  async function deleteTask(taskId: string) {
+    const res = await fetch(`/api/tasks/${taskId}`, { method: "DELETE" });
+
+    if (res.ok) {
+      addToast({ title: "Task deleted", variant: "success" });
+      // Drop it locally too: a full reload would re-order the list under the
+      // cursor while someone is working through several in a row.
+      setTasks((current) => current.filter((t) => t.id !== taskId));
+    } else {
+      addToast({ title: "Failed to delete task", variant: "destructive" });
+    }
+    setConfirmingDelete(null);
+  }
 
   async function updateTaskStatus(taskId: string, status: string) {
     const res = await fetch(`/api/tasks/${taskId}`, {
@@ -191,32 +209,69 @@ export default function TasksPage() {
                       </div>
                     </div>
 
-                    {/* Actions */}
-                    {(task.status === "pending" ||
-                      task.status === "in_progress") && (
-                      <div className="flex gap-2 shrink-0">
+                    {/* Actions. Delete is offered for every status: the
+                        complete/cancel pair was gated on the task still being
+                        open, which left finished tasks with no controls at all
+                        and no way to clear them out. */}
+                    <div className="flex gap-2 shrink-0">
+                      {(task.status === "pending" ||
+                        task.status === "in_progress") && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              updateTaskStatus(task.id, "completed")
+                            }
+                            className="text-green-600 hover:text-green-700"
+                            title="Mark completed"
+                          >
+                            <CheckCircle className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              updateTaskStatus(task.id, "cancelled")
+                            }
+                            className="text-gray-400 hover:text-red-500"
+                            title="Cancel"
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        </>
+                      )}
+
+                      {confirmingDelete === task.id ? (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => deleteTask(task.id)}
+                            className="bg-red-600 text-white hover:bg-red-700 border-red-600"
+                          >
+                            Delete
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setConfirmingDelete(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() =>
-                            updateTaskStatus(task.id, "completed")
-                          }
-                          className="text-green-600 hover:text-green-700"
+                          onClick={() => setConfirmingDelete(task.id)}
+                          className="text-gray-400 hover:text-red-600"
+                          title="Delete permanently"
                         >
-                          <CheckCircle className="h-4 w-4" />
+                          <Trash2 className="h-4 w-4" />
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            updateTaskStatus(task.id, "cancelled")
-                          }
-                          className="text-gray-400 hover:text-red-500"
-                        >
-                          <XCircle className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
