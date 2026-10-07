@@ -17,6 +17,12 @@ import { getMicrosoftConfig, getMicrosoftConfigStatus } from "@/lib/integrations
  * why plans are discovered through /me/planner/plans rather than by walking
  * the groups that own them.
  *
+ * Mail.Read, not Mail.ReadWrite or Mail.Send. Reading is what makes the
+ * assistant useful ("did the counterparty reply yet?"); sending from a
+ * lawyer's address is a different kind of decision and is not taken here. The
+ * scope was already on the token from an earlier consent but was missing from
+ * this list, so the next re-consent would have silently dropped it.
+ *
  * offline_access is what makes a refresh token come back at all.
  */
 const SCOPES = [
@@ -27,6 +33,7 @@ const SCOPES = [
   "User.Read",
   "Calendars.ReadBasic",
   "Tasks.ReadWrite",
+  "Mail.Read",
 ].join(" ");
 
 export async function GET() {
