@@ -119,16 +119,21 @@ export const assignTaskDefinition: ToolDefinition = {
 export const completeTaskDefinition: ToolDefinition = {
   name: "tasks_complete",
   description:
-    "Mark a task as completed, by its id. Get the id from tasks_list_mine or tasks_list_owed first. Only the owner of a task may complete it.",
+    "Mark one or more tasks as completed, by id. Get ids from tasks_list_mine or tasks_list_owed first. Pass EVERY id you want closed in task_ids in a single call - closing them one per call wastes turns and can run out of them mid-way. Only the owner of a task may complete it.",
   parameters: {
     type: "object",
     properties: {
+      task_ids: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Ids of the tasks to complete. Pass them all at once, e.g. when asked to close everything old.",
+      },
       task_id: {
         type: "string",
-        description: "The id of the task to complete.",
+        description: "A single task id. Prefer task_ids when closing more than one.",
       },
     },
-    required: ["task_id"],
   },
 };
 
@@ -220,18 +225,39 @@ export async function completeTaskExecutor(
   context?: ToolContext
 ) {
   const me = requireContext(context);
-  const taskId = typeof args.task_id === "string" ? args.task_id : "";
-  if (!taskId) return { error: "A task_id is required." };
 
-  // Only complete tasks the caller actually owns.
+  // Accept either shape. The model reaches for whichever the phrasing
+  // suggests, and a rejected call costs a whole turn.
+  const ids = [
+    ...(Array.isArray(args.task_ids) ? args.task_ids : []),
+    ...(typeof args.task_id === "string" ? [args.task_id] : []),
+  ]
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+
+  const unique = Array.from(new Set(ids));
+  if (unique.length === 0) return { error: "At least one task id is required." };
+
+  // Ownership is checked once for the whole batch rather than per id.
   const mine = (await getOpenTasksFor(me)) as TaskRow[];
-  if (!mine.some((t) => t.id === taskId)) {
-    return {
-      error:
-        "That task is not one of your open tasks, so it was not changed.",
-    };
+  const open = new Set(mine.map((t) => t.id));
+
+  const completed: string[] = [];
+  const skipped: string[] = [];
+
+  for (const id of unique) {
+    if (!open.has(id)) {
+      skipped.push(id);
+      continue;
+    }
+    await markTaskCompleted(id);
+    completed.push(id);
   }
 
-  await markTaskCompleted(taskId);
-  return { completed: true, task_id: taskId };
+  return {
+    completed: completed.length,
+    completed_ids: completed,
+    // Named so the model reports "already closed" rather than an error:
+    // re-closing a finished task is a no-op, not a failure.
+    skipped_not_open: skipped,
+  };
 }

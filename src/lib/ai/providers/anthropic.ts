@@ -8,7 +8,10 @@ import type {
 } from "../types";
 import { costUsd } from "../pricing";
 
-const MAX_TOOL_ITERATIONS = 5;
+// Each task closed, each calendar day checked, is one iteration. Five ran
+// out mid-way through "close all the old tasks" - the work was done and the
+// reply was lost. Bulk tool arguments keep the usual case to two or three.
+const MAX_TOOL_ITERATIONS = 10;
 
 const VALID_MODELS = [
   "claude-opus-5",
@@ -238,10 +241,70 @@ export class AnthropicProvider implements AIProvider {
       iterations++;
     }
 
-    // If we exhausted iterations, return whatever we have
+    // Out of iterations. The tool calls up to this point SUCCEEDED - what is
+    // missing is only the sentence describing them. Announcing failure here
+    // told the user nothing happened while five of their tasks had in fact
+    // just been closed. So ask once more with no tools, which forces a text
+    // answer, and let it report what it actually did.
+    try {
+      const summary = await this.client.messages.create({
+        model: this.modelName,
+        max_tokens: config?.maxTokens ?? 2048,
+        ...(NO_SAMPLING_PARAMS.includes(this.modelName)
+          ? {}
+          : { temperature: config?.temperature ?? 0.7 }),
+        system: [
+          {
+            type: "text" as const,
+            text: systemPrompt,
+            cache_control: { type: "ephemeral" as const },
+          },
+        ],
+        messages: [
+          ...workingMessages,
+          {
+            role: "user" as const,
+            content:
+              "Stop here and reply to me now, in my language, based on what you have already done. Do not ask to use any more tools.",
+          },
+        ],
+      });
+
+      totalInputTokens += summary.usage.input_tokens;
+      totalOutputTokens += summary.usage.output_tokens;
+      totalCacheWriteTokens += summary.usage.cache_creation_input_tokens ?? 0;
+      totalCacheReadTokens += summary.usage.cache_read_input_tokens ?? 0;
+
+      const text = summary.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("")
+        .trim();
+
+      if (text) {
+        return {
+          content: text,
+          inputTokens: totalInputTokens,
+          outputTokens: totalOutputTokens,
+          costUsd: costUsd(
+            this.modelName,
+            totalInputTokens,
+            totalOutputTokens,
+            totalCacheWriteTokens,
+            totalCacheReadTokens
+          ),
+          modelUsed: this.modelName,
+          finishReason: "max_iterations_summarised",
+        };
+      }
+    } catch (error) {
+      console.error("Could not summarise after exhausting iterations:", error);
+    }
+
     return {
-      content:
-        "I tried to use tools but exceeded the maximum number of iterations. Please try again with a simpler request.",
+      // Hebrew, and vague about the cause on purpose: "maximum number of
+      // iterations" is an implementation detail the user cannot act on.
+      content: "סליחה, לא הספקתי לסיים את זה. תנסה שוב? 🙏",
       inputTokens: totalInputTokens,
       outputTokens: totalOutputTokens,
       costUsd: costUsd(
