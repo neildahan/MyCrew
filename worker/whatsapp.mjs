@@ -64,8 +64,38 @@ const AUTH_DIR = path.join(projectRoot, ".whatsapp-auth");
  * -> "Link with phone number instead".
  */
 const PAIR_NUMBER = (process.env.PAIR_NUMBER ?? "").replace(/[^0-9]/g, "");
+/**
+ * LID -> phone number, as "lid=phone,lid=phone".
+ *
+ * WhatsApp now addresses senders by an opaque @lid instead of their number,
+ * and this Baileys version carries no mapping: the message key holds the LID
+ * and nothing else. So the allowlist never matched and every message from the
+ * crew was dropped as a stranger.
+ *
+ * A LID is stable per account, so aliasing one to a number is exactly as
+ * restrictive as listing the number was. Resolving here rather than in the app
+ * means the server keeps seeing real phone numbers and needs no changes.
+ */
+const CREW_ALIASES = Object.fromEntries(
+  (process.env.CREW_ALIASES ?? "")
+    .split(",")
+    .map((pair) => pair.split("=").map((x) => x.replace(/[^0-9]/g, "")))
+    .filter(([lid, phone]) => lid && phone)
+);
+
 /** Write each QR to this path as a PNG, for sending to the person pairing. */
 const QR_PNG = process.env.QR_PNG ?? "";
+
+/**
+ * Whether any socket in this process has reached a live connection.
+ *
+ * Once it has, the stored credentials are known good, and NOTHING short of an
+ * explicit logout should delete them. A transient close - a 408 from a slow
+ * init query, a dropped wifi - used to fall through to the "pairing expired"
+ * branch and wipe a working pairing, forcing a fresh QR scan. That cost two
+ * confirmed-good pairings before it was spotted.
+ */
+let everConnected = false;
 
 if (!SECRET) {
   console.error("AGENT_API_SECRET is not set. Add it to .env.local and to Vercel.");
@@ -208,10 +238,19 @@ async function start() {
     }
 
     if (connection === "open") {
+      everConnected = true;
       const me = toNumber(sock.user?.id);
       console.log(`\nConnected as ${me}`);
       console.log(`Crew: ${CREW.join(", ")}`);
       console.log(GROUP_ID ? `Listening in group ${GROUP_ID}` : "Direct messages only (CREW_GROUP_ID not set)");
+      // LID DIAG: ask WhatsApp what it knows about each crew number, to see
+      // whether it hands back a LID we could map the allowlist onto.
+      for (const n of CREW) {
+        sock
+          .onWhatsApp(n)
+          .then((r) => console.log(`  onWhatsApp(${n}) -> ${JSON.stringify(r)}`))
+          .catch((e) => console.log(`  onWhatsApp(${n}) failed: ${e.message}`));
+      }
       console.log("Waiting for messages...\n");
     }
 
@@ -238,18 +277,22 @@ async function start() {
         return;
       }
 
-      if (!registered) {
-        // Closing before registration means the pairing code timed out.
-        // Reconnecting here would silently issue a SECOND code while the
-        // first is still on screen, and pairing with the stale one then
-        // fails - which is exactly how this broke the first time.
-        fs.rmSync(AUTH_DIR, { recursive: true, force: true });
-        console.log(`\nPairing window expired (${code}). Run again for a fresh code.\n`);
-        process.exit(1);
+      // Credentials we know work: reconnect, never delete. Everything from
+      // here down is an ordinary disconnect.
+      if (everConnected || registered) {
+        console.log(`Connection closed (${code}). Reconnecting in 3s...`);
+        setTimeout(start, 3000);
+        return;
       }
 
-      console.log(`Connection closed (${code}). Reconnecting...`);
-      start();
+      // Never connected and never registered, so the pairing attempt itself
+      // failed and these half-written credentials are worthless. Reconnecting
+      // here would silently issue a SECOND code while the first is still on
+      // screen, and pairing with the stale one then fails - which is exactly
+      // how this broke the first time.
+      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+      console.log(`\nPairing window expired (${code}). Run again for a fresh code.\n`);
+      process.exit(1);
     }
   });
 
@@ -271,12 +314,22 @@ async function start() {
       if (msg.key.fromMe && !isSelfChat) continue;
 
       const senderJid = isGroup ? msg.key.participant ?? "" : chatJid;
-      const sender = isSelfChat ? myNumber : toNumber(senderJid);
+      const rawSender = isSelfChat ? myNumber : toNumber(senderJid);
+      // An unmapped LID stays itself, so it is still rejected rather than
+      // waved through.
+      const sender = CREW_ALIASES[rawSender] ?? rawSender;
       const text = readText(msg);
 
       if (!text) continue;
       if (!CREW.includes(sender)) {
+        // LID DIAG: WhatsApp now addresses senders by an opaque @lid rather
+        // than their phone number, so the allowlist never matches. Dump the
+        // whole key to find which field, if any, still carries the number.
         console.log(`  ignored: ${sender} is not in the crew`);
+        console.log(`  key: ${JSON.stringify(msg.key)}`);
+        console.log(`  (add ${rawSender}=<phone> to CREW_ALIASES if this is a crew member)`);
+        if (msg.participant) console.log(`  participant: ${msg.participant}`);
+        if (msg.verifiedBizName) console.log(`  bizName: ${msg.verifiedBizName}`);
         continue;
       }
       if (isGroup && GROUP_ID && chatJid !== GROUP_ID) {
