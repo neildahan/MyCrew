@@ -51,6 +51,8 @@ import {
   plannerCompleteExecutor,
   plannerUpdateDefinition,
   plannerUpdateExecutor,
+  plannerRemindDefinition,
+  plannerRemindExecutor,
 } from "./planner";
 import { getComposioTools, executeComposioTool, isComposioTool } from "./composio";
 
@@ -76,6 +78,7 @@ const toolExecutors: Record<
   planner_create_task: plannerCreateExecutor,
   planner_complete_task: plannerCompleteExecutor,
   planner_update_task: plannerUpdateExecutor,
+  planner_set_reminder: plannerRemindExecutor,
   outlook_search_mail: outlookSearchMailExecutor,
   outlook_read_mail: outlookReadMailExecutor,
 };
@@ -99,6 +102,7 @@ const agentToolMap: Record<string, string[]> = {
     "planner_create_task",
     "planner_complete_task",
     "planner_update_task",
+    "planner_set_reminder",
     "outlook_search_mail",
     "outlook_read_mail",
   ],
@@ -131,6 +135,7 @@ const toolDefinitions: Record<string, ToolDefinition> = {
   planner_create_task: plannerCreateDefinition,
   planner_complete_task: plannerCompleteDefinition,
   planner_update_task: plannerUpdateDefinition,
+  planner_set_reminder: plannerRemindDefinition,
   outlook_search_mail: outlookSearchMailDefinition,
   outlook_read_mail: outlookReadMailDefinition,
 };

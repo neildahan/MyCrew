@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDigestTasks } from "@/lib/reminders/save";
+import { plannerListExecutor } from "@/lib/tools/planner";
 import { sendTextMessage } from "@/lib/whatsapp/client";
 import { getCrewNumbers } from "@/lib/crew";
-import { DEFAULT_TIMEZONE, dayOfWeekIn, endOfDayUtc } from "@/lib/time";
+import { DEFAULT_TIMEZONE, dayOfWeekIn } from "@/lib/time";
 import { getSpendReport, formatUsd } from "@/lib/ai/budget";
 
 export const dynamic = "force-dynamic";
@@ -17,58 +17,70 @@ const WORK_DAYS = [0, 1, 2, 3, 4];
 // summer time and 07:00 in winter. An exact-hour guard here would skip the
 // digest entirely for half the year, so the hour is left to the schedule.
 
-function formatTime(iso: string | null): string {
-  if (!iso) return "";
-  return new Date(iso).toLocaleTimeString("he-IL", {
-    timeZone: TIMEZONE,
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-type DigestTask = {
+interface PlannerRow {
+  id: string;
   title: string;
-  due_at: string | null;
-  priority: string;
-  requested_by: string | null;
-};
-
-function buildDigest(tasks: DigestTask[], now: Date, footer: string): string {
-  if (tasks.length === 0) {
-    return "☀️ *בוקר טוב*\n\nאין משימות פתוחות להיום. נקי." + footer;
-  }
-
-  const nowMs = now.getTime();
-  const overdue = tasks.filter((t) => t.due_at && new Date(t.due_at).getTime() < nowMs);
-  const today = tasks.filter((t) => !overdue.includes(t));
-
-  const lines = ["☀️ *בוקר טוב*"];
-
-  if (overdue.length > 0) {
-    lines.push("", `⚠️ *בפיגור* (${overdue.length})`);
-    for (const t of overdue) {
-      const who = t.requested_by ? ` — ביקש: ${t.requested_by}` : "";
-      lines.push(`• ${t.title}${who}`);
-    }
-  }
-
-  if (today.length > 0) {
-    lines.push("", `📅 *להיום* (${today.length})`);
-    for (const t of today) {
-      const time = formatTime(t.due_at);
-      const when = time ? `${time} — ` : "";
-      const who = t.requested_by ? ` — ביקש: ${t.requested_by}` : "";
-      lines.push(`• ${when}${t.title}${who}`);
-    }
-  }
-
-  return lines.join("\n") + footer;
+  due?: string;
+  overdue?: boolean;
+  assigned_to: string[];
 }
 
 /**
- * Yesterday's spend, appended to the digest. A cap that only speaks up once it
- * has already been hit is not visibility; this is the daily number.
+ * The digest reads Planner, not the local table.
+ *
+ * It used to query tasks the assistant wrote herself. Once Planner became the
+ * board she stopped writing there, so the morning message would have reported
+ * "nothing open" every day while real work sat overdue on the board.
  */
+async function buildDigest(whatsappUserId: string): Promise<string> {
+  const mine = (await plannerListExecutor(
+    { who: "me", status: "open" },
+    { whatsappUserId }
+  )) as { tasks?: PlannerRow[]; error?: string };
+
+  const theirs = (await plannerListExecutor(
+    { who: "other", status: "open" },
+    { whatsappUserId }
+  )) as { tasks?: PlannerRow[] };
+
+  if (mine.error) {
+    console.error("Digest could not read Planner:", mine.error);
+    return "";
+  }
+
+  const myTasks = mine.tasks ?? [];
+  const overdue = myTasks.filter((t) => t.overdue);
+  const rest = myTasks.filter((t) => !t.overdue);
+  const otherTasks = theirs.tasks ?? [];
+
+  if (myTasks.length === 0 && otherTasks.length === 0) {
+    return "☀️ *בוקר טוב*\n\nאין משימות פתוחות. נקי.";
+  }
+
+  const lines = ["☀️ *בוקר טוב*"];
+  const day = (t: PlannerRow) => (t.due ? `${t.due.slice(8, 10)}/${t.due.slice(5, 7)} — ` : "");
+
+  if (overdue.length > 0) {
+    lines.push("", `⚠️ *בפיגור* (${overdue.length})`);
+    for (const t of overdue) lines.push(`• ${day(t)}${t.title}`);
+  }
+
+  if (rest.length > 0) {
+    lines.push("", `📋 *על הראש* (${rest.length})`);
+    for (const t of rest) lines.push(`• ${day(t)}${t.title}`);
+  }
+
+  // The other person's open items, so "מה ענבל צריכה?" is answered before it
+  // is asked. Titles only - this is a nudge, not their whole board.
+  if (otherTasks.length > 0) {
+    const name = otherTasks[0]?.assigned_to?.[0] ?? "אצלה";
+    lines.push("", `👤 *${name}* (${otherTasks.length})`);
+    for (const t of otherTasks.slice(0, 5)) lines.push(`• ${day(t)}${t.title}`);
+  }
+
+  return lines.join("\n");
+}
+
 async function buildCostFooter(): Promise<string> {
   try {
     const r = await getSpendReport(7);
@@ -126,21 +138,24 @@ export async function GET(request: NextRequest) {
   }
 
   const costFooter = await buildCostFooter();
-  const cutoff = endOfDayUtc(now, TIMEZONE).toISOString();
   const results: Array<{ to: string; tasks: number; digest?: string; error?: string }> = [];
 
   for (const number of crew) {
     try {
-      const tasks = (await getDigestTasks(number, cutoff)) as DigestTask[];
-      const digest = buildDigest(tasks, now, costFooter);
+      const body = await buildDigest(number);
+      if (!body) {
+        results.push({ to: number, tasks: 0, error: "Could not read the board" });
+        continue;
+      }
+      const digest = body + costFooter;
 
       if (dryRun) {
-        results.push({ to: number, tasks: tasks.length, digest });
+        results.push({ to: number, tasks: body.split("\n• ").length - 1, digest });
         continue;
       }
 
       await sendTextMessage(number, digest);
-      results.push({ to: number, tasks: tasks.length });
+      results.push({ to: number, tasks: body.split("\n• ").length - 1 });
     } catch (error) {
       console.error(`Failed to send digest to ${number}:`, error);
       results.push({

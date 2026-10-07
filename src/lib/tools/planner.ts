@@ -403,3 +403,84 @@ export async function plannerUpdateExecutor(args: Record<string, unknown>) {
     task: after.ok && after.data ? await present(after.data) : undefined,
   };
 }
+
+// --- Reminders ---
+
+/**
+ * Planner has due dates but no concept of "remind me at 15:00", so the time of
+ * day has to live here. The row holds a Planner id and an instant - never a
+ * copy of the task text, because a second copy is how the two systems start
+ * disagreeing about what the task says.
+ */
+export const plannerRemindDefinition: ToolDefinition = {
+  name: "planner_set_reminder",
+  description:
+    "Send a WhatsApp reminder about a Planner task at a specific time. Use for 'תזכירי לי מחר ב-3 על...', 'remind me Sunday morning about...'. For a deadline with no particular time, set the task's due date with planner_update_task instead - the morning digest already covers those.",
+  parameters: {
+    type: "object",
+    properties: {
+      task_id: {
+        type: "string",
+        description: "The Planner task to remind about. Get it from planner_list_tasks.",
+      },
+      when: {
+        type: "string",
+        description:
+          "When to send it, as a full ISO 8601 instant, e.g. 2026-10-09T15:00:00+03:00. Israel time. Must be in the future.",
+      },
+    },
+    required: ["task_id", "when"],
+  },
+};
+
+export async function plannerRemindExecutor(
+  args: Record<string, unknown>,
+  context?: ToolContext
+) {
+  const taskId = typeof args.task_id === "string" ? args.task_id.trim() : "";
+  const when = typeof args.when === "string" ? args.when.trim() : "";
+  if (!taskId || !when) return { error: "A task_id and a time are required." };
+
+  const at = new Date(when);
+  if (Number.isNaN(at.getTime())) return { error: `"${when}" is not a valid time.` };
+  if (at.getTime() <= Date.now()) {
+    return { error: "That time has already passed. Ask for a time in the future." };
+  }
+
+  const owner = context?.whatsappUserId;
+  if (!owner) return { error: "Reminders need a known caller." };
+
+  // Confirm the task exists before promising to remind anyone about it.
+  const task = await graph<PlannerTask>(`/planner/tasks/${taskId}`);
+  if (!task.ok || !task.data) {
+    return { error: task.error ?? "That task was not found on the board." };
+  }
+
+  const { createAdminClient } = await import("@/lib/supabase/admin");
+  const supabase = createAdminClient();
+
+  const { error } = await supabase.from("tasks").insert({
+    agent_slug: "yarden",
+    whatsapp_user_id: owner,
+    // The title is for the message text only; Planner stays the source of
+    // truth, and the sender re-reads it before sending.
+    title: task.data.title,
+    task_type: "reminder",
+    status: "pending",
+    priority: "medium",
+    remind_at: at.toISOString(),
+    is_reminder_sent: false,
+    metadata: { planner_task_id: taskId },
+  });
+
+  if (error) {
+    console.error("Could not store the reminder:", error);
+    return { error: "Could not save the reminder." };
+  }
+
+  return {
+    set: true,
+    task: task.data.title,
+    at: at.toISOString(),
+  };
+}

@@ -63,9 +63,68 @@ async function sendWhatsApp(to, text) {
   if (!res.ok) throw new Error(`WhatsApp ${res.status}: ${await res.text()}`);
 }
 
+
+/**
+ * Reminders can point at a Planner task. The board is the truth, so a task
+ * closed there must not still be reminded about - a reminder for something
+ * already done is how people learn to ignore reminders.
+ *
+ * Best effort: if Graph cannot be reached the reminder is still sent, since
+ * a missed reminder is worse than a redundant one.
+ */
+let graphToken = null;
+async function microsoftToken() {
+  if (graphToken !== null) return graphToken;
+  graphToken = false;
+  try {
+    const r = await db("integrations?provider=eq.microsoft&is_active=eq.true&select=access_token,refresh_token,token_expires_at");
+    const [row] = await r.json();
+    if (!row) return graphToken;
+
+    if (new Date(row.token_expires_at).getTime() - Date.now() > 5 * 60_000) {
+      graphToken = row.access_token;
+      return graphToken;
+    }
+
+    const cfg = await (await db("settings?key=in.(microsoft_client_id,microsoft_client_secret,microsoft_tenant)&select=key,value")).json();
+    const m = Object.fromEntries(cfg.map((c) => [c.key, c.value]));
+    const t = await (await fetch(`https://login.microsoftonline.com/${m.microsoft_tenant ?? "common"}/oauth2/v2.0/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: m.microsoft_client_id,
+        client_secret: m.microsoft_client_secret,
+        refresh_token: row.refresh_token,
+        grant_type: "refresh_token",
+      }),
+    })).json();
+    graphToken = t.access_token ?? false;
+  } catch (error) {
+    console.warn(`Could not get a Graph token: ${error.message}`);
+  }
+  return graphToken;
+}
+
+/** "done" | "open" | "unknown" for a Planner task. */
+async function plannerStatus(taskId) {
+  const token = await microsoftToken();
+  if (!token) return "unknown";
+  try {
+    const r = await fetch(`https://graph.microsoft.com/v1.0/planner/tasks/${taskId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (r.status === 404) return "done"; // deleted from the board
+    if (!r.ok) return "unknown";
+    const t = await r.json();
+    return (t.percentComplete ?? 0) >= 100 ? "done" : "open";
+  } catch {
+    return "unknown";
+  }
+}
+
 const now = new Date().toISOString();
 const query =
-  `tasks?select=id,title,agent_slug,whatsapp_user_id,task_type` +
+  `tasks?select=id,title,agent_slug,whatsapp_user_id,task_type,metadata` +
   `&is_reminder_sent=eq.false&remind_at=not.is.null&remind_at=lte.${now}` +
   `&status=in.(pending,in_progress)&order=remind_at.asc`;
 
@@ -86,6 +145,22 @@ let failed = 0;
 
 for (const task of tasks) {
   try {
+    const plannerId = task.metadata?.planner_task_id;
+    if (plannerId && (await plannerStatus(plannerId)) === "done") {
+      await db(`tasks?id=eq.${task.id}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          is_reminder_sent: true,
+          status: "completed",
+          completed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      console.log(`Skipped (already done on the board): ${task.title}`);
+      continue;
+    }
+
     const emoji = AGENT_EMOJIS[task.agent_slug] ?? "⏰";
     await sendWhatsApp(task.whatsapp_user_id, `${emoji} *תזכורת:* ${task.title}`);
 
