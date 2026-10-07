@@ -4,6 +4,7 @@ import { extractTask } from "@/lib/reminders/extract";
 import { saveTask } from "@/lib/reminders/save";
 import { isCrewMember, getCrewName } from "@/lib/crew";
 import { getAgentApiSecret } from "@/lib/agent-api-secret";
+import { failureMessage } from "@/lib/ai/failure-message";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
     // Deliberately vague to the user: the Meta path used to paste raw API
     // errors into the chat, which is both confusing and leaky.
     return NextResponse.json({
-      reply: "סליחה, משהו השתבש אצלי. נסה שוב עוד רגע.",
+      reply: failureMessage(error),
       error: message,
     });
   }

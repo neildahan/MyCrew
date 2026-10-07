@@ -7,6 +7,7 @@ import { saveTask } from "@/lib/reminders/save";
 import { getProvider } from "@/lib/ai/provider-registry";
 import { isCrewMember } from "@/lib/crew";
 import { getSpendReport, formatUsd } from "@/lib/ai/budget";
+import { failureMessage } from "@/lib/ai/failure-message";
 
 const SWITCH_FAILED =
   "\u05dc\u05d0 \u05d4\u05e6\u05dc\u05d7\u05ea\u05d9 \u05dc\u05d4\u05d7\u05dc\u05d9\u05e3. \u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1 \u05d1\u05e2\u05d5\u05d3 \u05e8\u05d2\u05e2. \ud83d\ude4f";
@@ -493,7 +494,7 @@ async function processMessage(
     // leaks internals. The detail is already in the server log above.
     await sendTextMessage(
       senderId,
-      "\u05e1\u05dc\u05d9\u05d7\u05d4, \u05de\u05e9\u05d4\u05d5 \u05d4\u05e9\u05ea\u05d1\u05e9 \u05d0\u05e6\u05dc\u05d9 \u05e8\u05d2\u05e2. \u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1? \ud83d\ude4f"
+      failureMessage(error)
     );
   }
 }
