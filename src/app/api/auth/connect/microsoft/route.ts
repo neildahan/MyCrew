@@ -11,6 +11,12 @@ import { getMicrosoftConfig, getMicrosoftConfigStatus } from "@/lib/integrations
  * delegated scope, and getSchedule still returns subjects, so this is the
  * least the assistant can be given while still being useful.
  *
+ * Tasks.ReadWrite covers Planner: read the plans this person belongs to, and
+ * create, complete and assign tasks in them. It is the least privileged scope
+ * for plannerTask and, unlike Group.Read.All, needs no tenant admin. That is
+ * why plans are discovered through /me/planner/plans rather than by walking
+ * the groups that own them.
+ *
  * offline_access is what makes a refresh token come back at all.
  */
 const SCOPES = [
@@ -20,6 +26,7 @@ const SCOPES = [
   "profile",
   "User.Read",
   "Calendars.ReadBasic",
+  "Tasks.ReadWrite",
 ].join(" ");
 
 export async function GET() {
