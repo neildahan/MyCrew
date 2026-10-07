@@ -3,6 +3,7 @@ import { runAgent } from "@/lib/ai/agent-runner";
 import { extractTask } from "@/lib/reminders/extract";
 import { saveTask } from "@/lib/reminders/save";
 import { isCrewMember, getCrewName } from "@/lib/crew";
+import { getAgentApiSecret } from "@/lib/agent-api-secret";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -16,7 +17,7 @@ export const maxDuration = 60;
  * is the only way to reach a real WhatsApp group.
  */
 export async function POST(request: NextRequest) {
-  const secret = process.env.AGENT_API_SECRET;
+  const secret = await getAgentApiSecret();
   if (!secret) {
     console.error("AGENT_API_SECRET is not set; refusing to run.");
     return NextResponse.json({ error: "Not configured" }, { status: 503 });
