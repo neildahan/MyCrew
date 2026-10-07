@@ -4,7 +4,7 @@ import { buildSystemPrompt } from "@/lib/agents/prompt-builder";
 import { getToolsForAgent, executeToolCall } from "@/lib/tools/registry";
 import { getBudgetStatus, budgetExceededMessage } from "./budget";
 import { FALLBACK_MODEL } from "./pricing";
-import { getCrewName } from "@/lib/crew";
+import { getCrewName, mayUseSharedIntegrations } from "@/lib/crew";
 import { isIntegrationConnected } from "@/lib/integrations/token-manager";
 import type { AIMessage } from "./types";
 
@@ -110,13 +110,17 @@ export async function runAgent(
 
   if (tools.length > 0) {
     const googleConnected = await isIntegrationConnected("google");
-    if (!googleConnected) {
+    if (!googleConnected || !(await mayUseSharedIntegrations(whatsappUserId))) {
       // Remove Google-specific tools if not connected, keep web tools
       tools = tools.filter(t => !t.name.startsWith("google_") && !t.name.startsWith("gmail_"));
     }
 
     const microsoftConnected = await isIntegrationConnected("microsoft");
-    if (!microsoftConnected) {
+    // The mail and calendar tokens are shared, not per-person, so anyone
+    // holding these tools reads the OWNER's mailbox - and in a group, says
+    // what it finds out loud. Only the owner gets them.
+    const ownsIntegrations = await mayUseSharedIntegrations(whatsappUserId);
+    if (!microsoftConnected || !ownsIntegrations) {
       // Offering a calendar tool that always errors just wastes turns.
       tools = tools.filter(t => !t.name.startsWith("outlook_"));
     }

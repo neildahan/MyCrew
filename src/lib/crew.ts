@@ -86,3 +86,40 @@ export async function getOtherMember(whatsappUserId: string): Promise<string | n
   if (numbers.length !== 2) return null;
   return numbers.find((n) => n !== whatsappUserId) ?? null;
 }
+
+/**
+ * Who the shared integrations belong to.
+ *
+ * The Microsoft and Google connections are a single token per provider, not
+ * one per person, so ANY crew member reaching those tools reads the owner's
+ * calendar and mail. In a group that answer is spoken to the whole room.
+ *
+ * Stored as `integrations_owner`; defaults to the first crew member, which is
+ * whoever set the app up. Setting it to an empty string shares the mailbox
+ * with the whole crew deliberately.
+ */
+export async function getIntegrationsOwner(): Promise<string | null> {
+  try {
+    const supabase = createAdminClient();
+    const { data } = await supabase
+      .from("settings")
+      .select("value")
+      .eq("key", "integrations_owner")
+      .maybeSingle();
+    if (data) return data.value ?? null;
+  } catch (error) {
+    console.error("Could not read integrations_owner:", error);
+  }
+  const { numbers } = await load();
+  return numbers[0] ?? null;
+}
+
+/** May this person use the shared mail and calendar connections? */
+export async function mayUseSharedIntegrations(
+  whatsappUserId: string
+): Promise<boolean> {
+  const owner = await getIntegrationsOwner();
+  // No owner recorded means the crew shares them on purpose.
+  if (!owner) return true;
+  return owner === whatsappUserId;
+}
