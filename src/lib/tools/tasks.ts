@@ -14,6 +14,20 @@ import { getCrewName, getOtherMember } from "@/lib/crew";
  */
 export interface ToolContext {
   whatsappUserId: string;
+  /**
+   * What this person has actually typed, most recent first.
+   *
+   * Used to prove a phone number was named BY THEM. Yarden reads their mail
+   * and their task board, so a number she found in a message she was asked to
+   * summarise must never become a number she can write to.
+   */
+  userMessages?: string[];
+  /**
+   * Outbound WhatsApp messages this turn produced. The agent runs on Vercel
+   * but the WhatsApp connection lives in the worker, so the tool records the
+   * intent here and the worker is the one that sends it.
+   */
+  outbox?: Array<{ to: string; text: string }>;
 }
 
 type TaskRow = {

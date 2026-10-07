@@ -78,6 +78,9 @@ export async function POST(request: NextRequest) {
     const result = await runAgent("yarden", text, from);
     return NextResponse.json({
       reply: result.response,
+      // Messages for people who are not in this chat. The worker holds the
+      // WhatsApp connection, so it is the one that delivers them.
+      outbox: result.outbox ?? [],
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
     });

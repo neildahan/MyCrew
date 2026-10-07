@@ -54,6 +54,7 @@ import {
   plannerRemindDefinition,
   plannerRemindExecutor,
 } from "./planner";
+import { whatsappSendDefinition, whatsappSendExecutor } from "./whatsapp-send";
 import { getComposioTools, executeComposioTool, isComposioTool } from "./composio";
 
 // Map of tool name -> executor function
@@ -79,6 +80,7 @@ const toolExecutors: Record<
   planner_complete_task: plannerCompleteExecutor,
   planner_update_task: plannerUpdateExecutor,
   planner_set_reminder: plannerRemindExecutor,
+  whatsapp_send_message: whatsappSendExecutor,
   outlook_search_mail: outlookSearchMailExecutor,
   outlook_read_mail: outlookReadMailExecutor,
 };
@@ -105,6 +107,7 @@ const agentToolMap: Record<string, string[]> = {
     "planner_set_reminder",
     "outlook_search_mail",
     "outlook_read_mail",
+    "whatsapp_send_message",
   ],
   dana: [
     "web_search",
@@ -136,6 +139,7 @@ const toolDefinitions: Record<string, ToolDefinition> = {
   planner_complete_task: plannerCompleteDefinition,
   planner_update_task: plannerUpdateDefinition,
   planner_set_reminder: plannerRemindDefinition,
+  whatsapp_send_message: whatsappSendDefinition,
   outlook_search_mail: outlookSearchMailDefinition,
   outlook_read_mail: outlookReadMailDefinition,
 };

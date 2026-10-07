@@ -136,7 +136,7 @@ async function askAgent({ from, text, isGroup, extractOnly }) {
     return null;
   }
   const data = await res.json();
-  return data.reply ?? null;
+  return { reply: data.reply ?? null, outbox: data.outbox ?? [] };
 }
 
 async function start() {
@@ -357,11 +357,23 @@ async function start() {
         await sock.readMessages([msg.key]);
         if (!extractOnly) await sock.sendPresenceUpdate("composing", chatJid);
 
-        const reply = await askAgent({ from: sender, text, isGroup, extractOnly });
+        const { reply, outbox } = await askAgent({ from: sender, text, isGroup, extractOnly });
 
         if (reply) {
           await sock.sendMessage(chatJid, { text: reply });
           console.log(`  replied: ${reply.slice(0, 60)}`);
+        }
+
+        // Messages for people outside this chat. The app decided these were
+        // allowed - it checked the number against what the sender typed - and
+        // this just delivers them. One failure must not stop the rest.
+        for (const out of outbox) {
+          try {
+            await sock.sendMessage(`${out.to}@s.whatsapp.net`, { text: out.text });
+            console.log(`  sent to ${out.to}: ${out.text.slice(0, 50)}`);
+          } catch (error) {
+            console.error(`  could not send to ${out.to}:`, error?.message ?? error);
+          }
         }
       } catch (error) {
         console.error("  failed to handle message:", error?.message ?? error);

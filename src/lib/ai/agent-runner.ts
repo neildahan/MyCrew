@@ -18,6 +18,8 @@ interface RunAgentResult {
   response: string;
   inputTokens: number;
   outputTokens: number;
+  /** Messages for people outside this chat, for the transport to deliver. */
+  outbox?: Array<{ to: string; text: string }>;
 }
 
 export async function runAgent(
@@ -105,6 +107,10 @@ export async function runAgent(
     `\n\nThe person you are talking to right now is ${await getCrewName(whatsappUserId)}.`;
 
   // 7. Load tools for the agent
+  // Outbound messages this turn produced. The agent runs here but the
+  // WhatsApp connection lives in the worker, so these travel back with the
+  // reply and the worker does the sending.
+  const outbox: Array<{ to: string; text: string }> = [];
   let tools = await getToolsForAgent(agentSlug, whatsappUserId);
   let toolExecutor: ((name: string, args: Record<string, unknown>) => Promise<unknown>) | undefined;
 
@@ -130,8 +136,16 @@ export async function runAgent(
     if (tools.length > 0) {
       // Bind the sender's identity here so task tools cannot be told
       // who they are acting as by the model or the message content.
+      // Only what THIS person typed, newest first. The send tool proves a
+      // number against it, so assistant turns and other people's text must
+      // never be in here.
+      const userMessages = [
+        userMessage,
+        ...messages.filter((m) => m.role === "user").map((m) => m.content),
+      ];
+
       toolExecutor = (name, args) =>
-        executeToolCall(name, args, { whatsappUserId });
+        executeToolCall(name, args, { whatsappUserId, userMessages, outbox });
     }
   }
 
@@ -219,6 +233,7 @@ export async function runAgent(
     response: aiResponse.content,
     inputTokens: aiResponse.inputTokens,
     outputTokens: aiResponse.outputTokens,
+    outbox,
   };
 }
 
